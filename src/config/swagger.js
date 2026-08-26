@@ -74,6 +74,12 @@ const socket = io('http://localhost:3090', {
           bearerFormat: 'JWT',
           description: 'Token JWT obtenido tras el inicio de sesión (/auth/login)',
         },
+        ApiKeyAuth: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'x-api-token',
+          description: 'Token opcional de sistema',
+        },
       },
       schemas: {
         RegistroUsuario: {

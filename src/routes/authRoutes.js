@@ -8,7 +8,7 @@ const { protegerRuta } = require('../middlewares/authMiddleware');
  * /auth/registro:
  *   post:
  *     summary: Registrar un nuevo usuario/operador
- *     tags: [Autenticación]
+ *     tags: [Autenticacion]
  *     requestBody:
  *       required: true
  *       content:
@@ -28,7 +28,7 @@ router.post('/registro', authController.registrar);
  * /auth/login:
  *   post:
  *     summary: Iniciar sesión y obtener JWT
- *     tags: [Autenticación]
+ *     tags: [Autenticacion]
  *     requestBody:
  *       required: true
  *       content:
@@ -48,7 +48,7 @@ router.post('/login', authController.login);
  * /auth/logout:
  *   post:
  *     summary: Cerrar sesión activa (1:N)
- *     tags: [Autenticación]
+ *     tags: [Autenticacion]
  *     security:
  *       - BearerAuth: []
  *     responses:
@@ -62,7 +62,7 @@ router.post('/logout', protegerRuta, authController.logout);
  * /auth/perfil:
  *   get:
  *     summary: Obtener perfil del usuario autenticado
- *     tags: [Autenticación]
+ *     tags: [Autenticacion]
  *     security:
  *       - BearerAuth: []
  *     responses:
