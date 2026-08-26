@@ -1,0 +1,428 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "API Sala Situacional - Sistema Colaborativo de Alertas",
+    "version": "1.0.0",
+    "description": "Documentación OpenAPI interactiva para el sistema de alertas de Segura EP. Requiere el SCRIPT_API_TOKEN institucional y JWT de sesión."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3088",
+      "description": "Servidor Local"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-token",
+        "description": "Token de sistema del .env (SCRIPT_API_TOKEN)"
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Token JWT obtenido tras el inicio de sesión"
+      }
+    },
+    "schemas": {
+      "RegistroUsuario": {
+        "type": "object",
+        "required": [
+          "correo",
+          "password"
+        ],
+        "properties": {
+          "correo": {
+            "type": "string",
+            "example": "operador@segura.gob.ec"
+          },
+          "password": {
+            "type": "string",
+            "example": "password123"
+          },
+          "nombre": {
+            "type": "string",
+            "example": "Operador Sala 1"
+          }
+        }
+      },
+      "LoginUsuario": {
+        "type": "object",
+        "required": [
+          "correo",
+          "password"
+        ],
+        "properties": {
+          "correo": {
+            "type": "string",
+            "example": "operador@segura.gob.ec"
+          },
+          "password": {
+            "type": "string",
+            "example": "password123"
+          }
+        }
+      },
+      "CrearReporte": {
+        "type": "object",
+        "required": [
+          "titulo"
+        ],
+        "properties": {
+          "titulo": {
+            "type": "string",
+            "example": "Reporte de Novedades e Incidentes - Turno Mañana"
+          },
+          "observaciones_generales": {
+            "type": "string",
+            "example": "Monitoreo en tiempo real de lluvias y acumulación de agua."
+          }
+        }
+      },
+      "AgregarNovedad": {
+        "type": "object",
+        "required": [
+          "direccion"
+        ],
+        "properties": {
+          "tipo_evento": {
+            "type": "string",
+            "enum": [
+              "AGUA",
+              "ARBOL",
+              "DESLIZAMIENTO",
+              "POSTE",
+              "SINIESTRO",
+              "INUNDACION",
+              "VENDAVAL",
+              "AFECTACION",
+              "OTRO"
+            ],
+            "example": "AGUA"
+          },
+          "direccion": {
+            "type": "string",
+            "example": "PROSPERINA 6TO CALLEJON Y AV 41 DIAGONAL A LAS ROSAS"
+          },
+          "aga": {
+            "type": "string",
+            "example": "A09"
+          },
+          "instituciones": {
+            "type": "string",
+            "example": "@emapagye @interagua"
+          },
+          "fecha_evento": {
+            "type": "string",
+            "example": "2026-08-25"
+          },
+          "hora_evento": {
+            "type": "string",
+            "example": "16:40"
+          },
+          "latitud": {
+            "type": "number",
+            "example": -2.1894
+          },
+          "longitud": {
+            "type": "number",
+            "example": -79.8891
+          },
+          "descripcion": {
+            "type": "string",
+            "example": "Acumulación de agua considerable en calzada con afectación al tránsito."
+          },
+          "acciones_inmediatas": {
+            "type": "string",
+            "example": "Se despachó cuadrilla de Interagua."
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "paths": {
+    "/api/reportes": {
+      "get": {
+        "summary": "Listar todos los reportes con colaboradores (N:N) y novedades (1:N)",
+        "tags": [
+          "Reportes"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista de reportes"
+          }
+        }
+      },
+      "post": {
+        "summary": "Crear un nuevo reporte",
+        "tags": [
+          "Reportes"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CrearReporte"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Reporte creado exitosamente"
+          }
+        }
+      }
+    },
+    "/api/reportes/{id}": {
+      "get": {
+        "summary": "Obtener reporte por ID con sus novedades y colaboradores",
+        "tags": [
+          "Reportes"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID de MongoDB del reporte"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reporte encontrado"
+          },
+          "404": {
+            "description": "Reporte no encontrado"
+          }
+        }
+      }
+    },
+    "/api/reportes/{id}/novedades": {
+      "post": {
+        "summary": "Agregar una novedad al reporte (1:N) y registrar al colaborador (N:N)",
+        "tags": [
+          "Reportes"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID del reporte"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgregarNovedad"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Novedad agregada y campo 'Elaborado por' actualizado"
+          }
+        }
+      }
+    },
+    "/api/reportes/{id}/exportar-excel": {
+      "post": {
+        "summary": "Registrar y sincronizar novedades del reporte en el Excel de SharePoint (42 columnas)",
+        "tags": [
+          "Reportes"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "ID del reporte a exportar"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Novedades registradas exitosamente en la tabla de SharePoint"
+          },
+          "400": {
+            "description": "El reporte no contiene novedades"
+          },
+          "404": {
+            "description": "Reporte no encontrado"
+          }
+        }
+      }
+    },
+    "/api/auth/registro": {
+      "post": {
+        "summary": "Registrar un nuevo usuario/operador",
+        "tags": [
+          "Autenticación"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistroUsuario"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Usuario registrado exitosamente"
+          },
+          "400": {
+            "description": "Datos inválidos o correo ya registrado"
+          },
+          "403": {
+            "description": "SCRIPT_API_TOKEN inválido o ausente"
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Iniciar sesión y obtener JWT",
+        "tags": [
+          "Autenticación"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginUsuario"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Inicio de sesión exitoso (devuelve token JWT)"
+          },
+          "401": {
+            "description": "Credenciales incorrectas"
+          },
+          "403": {
+            "description": "SCRIPT_API_TOKEN inválido o ausente"
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "summary": "Cerrar sesión activa (1:N)",
+        "tags": [
+          "Autenticación"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sesión cerrada exitosamente"
+          }
+        }
+      }
+    },
+    "/api/auth/perfil": {
+      "get": {
+        "summary": "Obtener perfil del usuario autenticado",
+        "tags": [
+          "Autenticación"
+        ],
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Datos del usuario autenticado"
+          }
+        }
+      }
+    }
+  },
+  "tags": []
+}
