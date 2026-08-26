@@ -1,4 +1,4 @@
-﻿const jwt = require('jsonwebtoken');
+const jwt = require('jsonwebtoken');
 const Usuario = require('../models/Usuario');
 const Sesion = require('../models/Sesion');
 const Auditoria = require('../models/Auditoria');
@@ -14,7 +14,8 @@ const generarToken = (usuario) => {
 
 exports.registrar = async (req, res) => {
   try {
-    const { correo, password, nombre } = req.body;
+    console.log('[AUTH] Petición recibida en /auth/registro:', req.body?.correo);
+    const { correo, password, nombre } = req.body || {};
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
 
     if (!correo || !password) {
@@ -52,6 +53,7 @@ exports.registrar = async (req, res) => {
       ip,
     });
 
+    console.log('[AUTH] Usuario registrado exitosamente:', nuevoUsuario.correo);
     return res.status(201).json({
       ok: true,
       mensaje: 'Usuario registrado exitosamente',
@@ -71,7 +73,8 @@ exports.registrar = async (req, res) => {
 
 exports.login = async (req, res) => {
   try {
-    const { correo, password } = req.body;
+    console.log('[AUTH] Petición recibida en /auth/login:', req.body?.correo);
+    const { correo, password } = req.body || {};
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
 
     if (!correo || !password) {
@@ -80,12 +83,14 @@ exports.login = async (req, res) => {
 
     const usuario = await Usuario.findOne({ correo: correo.toLowerCase().trim() });
     if (!usuario) {
-      return res.status(401).json({ ok: false, mensaje: 'Credenciales inválidas' });
+      console.log('[AUTH] Usuario no encontrado:', correo);
+      return res.status(401).json({ ok: false, mensaje: 'Credenciales inválidas (usuario no registrado)' });
     }
 
     const passwordValido = await usuario.compararPassword(password);
     if (!passwordValido) {
-      return res.status(401).json({ ok: false, mensaje: 'Credenciales inválidas' });
+      console.log('[AUTH] Contraseña incorrecta para:', correo);
+      return res.status(401).json({ ok: false, mensaje: 'Credenciales inválidas (contraseña incorrecta)' });
     }
 
     const token = generarToken(usuario);
@@ -106,6 +111,7 @@ exports.login = async (req, res) => {
       ip,
     });
 
+    console.log('[AUTH] Login exitoso para:', usuario.correo);
     return res.json({
       ok: true,
       mensaje: 'Inicio de sesión exitoso',
