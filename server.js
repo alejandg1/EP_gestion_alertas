@@ -60,8 +60,9 @@ app.get('/', (req, res) => {
 initCollaborationSockets(io);
 
 const PORT = process.env.PORT || 3090;
-server.listen(PORT, () => {
-  console.log(`[INFO] Servidor ejecutandose en http://localhost:${PORT}`);
+const HOST = process.env.HOST || '0.0.0.0';
+server.listen(PORT, HOST, () => {
+  console.log(`[INFO] Servidor ejecutandose en http://${HOST}:${PORT}`);
   console.log(`[INFO] Documentacion OpenAPI Swagger UI: http://localhost:${PORT}/docs`);
   console.log(`[INFO] Especificacion OpenAPI JSON (Postman/Insomnia): http://localhost:${PORT}/docs.json`);
 });
