@@ -58,8 +58,12 @@ const socket = io('http://localhost:3090', {
     },
     servers: [
       {
-        url: '',
-        description: 'Servidor Actual',
+        url: 'http://10.10.80.70:3090',
+        description: 'Servidor Principal (10.10.80.70:3090)',
+      },
+      {
+        url: 'http://localhost:3090',
+        description: 'Servidor Local (localhost:3090)',
       },
     ],
     components: {

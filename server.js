@@ -36,6 +36,8 @@ app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customSiteTitle: 'Swagger - Sala Situacional Segura EP',
   swaggerOptions: {
     persistAuthorization: true,
+    validatorUrl: null,
+    supportedSubmitMethods: ['get', 'post', 'put', 'delete', 'patch']
   }
 }));
 

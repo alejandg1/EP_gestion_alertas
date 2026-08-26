@@ -16,7 +16,7 @@ exports.registrar = async (req, res) => {
   try {
     console.log('[AUTH] Petición recibida en /auth/registro:', req.body?.correo);
     const { correo, password, nombre } = req.body || {};
-    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+    const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
 
     if (!correo || !password) {
       return res.status(400).json({ ok: false, mensaje: 'Correo y contraseña son obligatorios' });
@@ -75,7 +75,7 @@ exports.login = async (req, res) => {
   try {
     console.log('[AUTH] Petición recibida en /auth/login:', req.body?.correo);
     const { correo, password } = req.body || {};
-    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+    const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
 
     if (!correo || !password) {
       return res.status(400).json({ ok: false, mensaje: 'Ingrese correo y contraseña' });
