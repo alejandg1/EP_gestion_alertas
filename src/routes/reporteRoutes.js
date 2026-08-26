@@ -1,7 +1,8 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const reporteController = require('../controllers/reporteController');
 const { protegerRuta } = require('../middlewares/authMiddleware');
+const upload = require('../middlewares/uploadMiddleware');
 
 /**
  * @openapi
@@ -36,6 +37,35 @@ router.post('/', protegerRuta, reporteController.crearReporte);
 
 /**
  * @openapi
+ * /api/reportes/upload-foto:
+ *   post:
+ *     summary: Subir fotografías de novedad al servidor local (Máx. 2 imágenes, 5MB c/u)
+ *     tags: [Reportes]
+ *     security:
+ *       - ApiKeyAuth: []
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               fotos:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *     responses:
+ *       201:
+ *         description: Fotos subidas y guardadas exitosamente en el servidor
+ *       400:
+ *         description: No se enviaron archivos o formato no permitido
+ */
+router.post('/upload-foto', protegerRuta, upload.array('fotos', 2), reporteController.subirFotos);
+
+/**
+ * @openapi
  * /api/reportes/{id}:
  *   get:
  *     summary: Obtener reporte por ID con sus novedades y colaboradores
@@ -60,9 +90,39 @@ router.get('/:id', protegerRuta, reporteController.obtenerReporte);
 
 /**
  * @openapi
+ * /api/reportes/{id}/parametros:
+ *   put:
+ *     summary: Actualizar parámetros institucionales del reporte (Sección 2 - RDS e INOCAR)
+ *     tags: [Reportes]
+ *     security:
+ *       - ApiKeyAuth: []
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID del reporte
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ActualizarParametrosReporte'
+ *     responses:
+ *       200:
+ *         description: Parámetros del reporte actualizados exitosamente
+ *       404:
+ *         description: Reporte no encontrado
+ */
+router.put('/:id/parametros', protegerRuta, reporteController.actualizarParametros);
+
+/**
+ * @openapi
  * /api/reportes/{id}/novedades:
  *   post:
- *     summary: Agregar una novedad al reporte (1:N) y registrar al colaborador (N:N)
+ *     summary: Agregar una novedad al reporte (1:N) vinculada directamente al Usuario con fotos
  *     tags: [Reportes]
  *     security:
  *       - ApiKeyAuth: []
@@ -80,11 +140,32 @@ router.get('/:id', protegerRuta, reporteController.obtenerReporte);
  *         application/json:
  *           schema:
  *             $ref: '#/components/schemas/AgregarNovedad'
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               tipo_evento: { type: string }
+ *               direccion: { type: string }
+ *               aga: { type: string }
+ *               instituciones: { type: string }
+ *               fecha_evento: { type: string }
+ *               hora_evento: { type: string }
+ *               latitud: { type: number }
+ *               longitud: { type: number }
+ *               recurso_asignado: { type: string }
+ *               estado_operativo: { type: string }
+ *               descripcion: { type: string }
+ *               acciones_inmediatas: { type: string }
+ *               fotos:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
  *     responses:
  *       201:
  *         description: Novedad agregada y campo 'Elaborado por' actualizado
  */
-router.post('/:id/novedades', protegerRuta, reporteController.agregarNovedad);
+router.post('/:id/novedades', protegerRuta, upload.array('fotos', 2), reporteController.agregarNovedad);
 
 /**
  * @openapi

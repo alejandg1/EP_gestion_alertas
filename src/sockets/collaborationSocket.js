@@ -1,4 +1,4 @@
-﻿const jwt = require('jsonwebtoken');
+const jwt = require('jsonwebtoken');
 const Reporte = require('../models/Reporte');
 const Auditoria = require('../models/Auditoria');
 
@@ -125,13 +125,16 @@ function initCollaborationSockets(io) {
           tipo_evento: novedad.tipo_evento || 'AGUA',
           direccion: novedad.direccion || 'Sin dirección',
           aga: novedad.aga || 'A09',
-          instituciones: novedad.instituciones || '@emapagye',
+          instituciones: novedad.instituciones || '@emapagye @interagua',
           fecha_evento: novedad.fecha_evento || new Date().toISOString().split('T')[0],
           hora_evento: novedad.hora_evento || '12:00',
           latitud: novedad.latitud !== undefined ? Number(novedad.latitud) : -2.1894,
           longitud: novedad.longitud !== undefined ? Number(novedad.longitud) : -79.8891,
+          recurso_asignado: novedad.recurso_asignado || 'INS-ALC 🚙',
+          estado_operativo: novedad.estado_operativo || '⛔PENDIENTE',
           descripcion: novedad.descripcion || '',
           acciones_inmediatas: novedad.acciones_inmediatas || '',
+          fotos: Array.isArray(novedad.fotos) ? novedad.fotos : [],
         };
 
         reporte.novedades.push(nuevaNovedad);
@@ -165,7 +168,37 @@ function initCollaborationSockets(io) {
       }
     });
 
-    // 5. Desconexión y limpieza de locks
+    // 5. Actualizar parámetros institucionales en tiempo real
+    socket.on('actualizar_parametros', async ({ reporteId, parametros }) => {
+      try {
+        const reporte = await Reporte.findById(reporteId);
+        if (!reporte) return;
+
+        const campos = [
+          'titulo', 'observaciones_generales', 'numero_rds', 'fecha_reporte',
+          'hora_inicio', 'hora_fin', 'revisado_por', 'cabecera', 'periodo',
+          'inocar_fecha', 'inocar_pleamar', 'inocar_bajamar'
+        ];
+
+        campos.forEach((campo) => {
+          if (parametros[campo] !== undefined) {
+            reporte[campo] = parametros[campo];
+          }
+        });
+
+        await reporte.save();
+
+        io.to(`reporte_${reporteId}`).emit('parametros_actualizados', {
+          reporteId,
+          parametros,
+          actualizadoPor: usuario.nombre || usuario.correo,
+        });
+      } catch (err) {
+        socket.emit('error_socket', { mensaje: 'Error al actualizar parámetros', error: err.message });
+      }
+    });
+
+    // 6. Desconexión y limpieza de locks
     socket.on('disconnect', () => {
       const reporteId = socket.reporteActual;
       if (reporteId) {

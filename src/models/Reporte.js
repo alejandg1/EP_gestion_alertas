@@ -1,15 +1,15 @@
-﻿const mongoose = require('mongoose');
+const mongoose = require('mongoose');
 
-// Subesquema de Novedad (1:N con Reporte)
+// Subesquema de Novedad (1:N con Reporte, vinculada directamente al Usuario creador)
 const novedadSchema = new mongoose.Schema({
   usuario_id: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Usuario',
-    required: false,
+    required: [true, 'El ID de usuario es obligatorio para cada novedad'],
   },
   usuario_nombre: {
     type: String,
-    default: 'Operador',
+    required: [true, 'El nombre de usuario es obligatorio para cada novedad'],
   },
   tipo_evento: {
     type: String,
@@ -50,6 +50,14 @@ const novedadSchema = new mongoose.Schema({
     type: Number,
     default: -79.8891,
   },
+  recurso_asignado: {
+    type: String,
+    default: 'INS-ALC 🚙',
+  },
+  estado_operativo: {
+    type: String,
+    default: '⛔PENDIENTE',
+  },
   descripcion: {
     type: String,
     default: '',
@@ -58,6 +66,9 @@ const novedadSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
+  fotos: [{
+    type: String, // Rutas o URLs de las fotografías almacenadas en el servidor
+  }],
   estado_novedad: {
     type: String,
     enum: ['ABIERTO', 'EN_ATENCION', 'CERRADO'],
@@ -73,7 +84,7 @@ const novedadSchema = new mongoose.Schema({
   }
 });
 
-// Subesquema de Colaborador (N:N con Usuarios)
+// Subesquema de Colaborador (N:N con Usuarios derivado de aportes/novedades)
 const colaboradorSchema = new mongoose.Schema({
   usuario_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -119,20 +130,59 @@ const reporteSchema = new mongoose.Schema({
     enum: ['BORRADOR', 'ACTIVO', 'FINALIZADO', 'EXPORTADO_EXCEL'],
     default: 'ACTIVO',
   },
-  creado_por: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Usuario',
-    required: true,
-  },
-  creador_nombre: {
+  // Parámetros institucionales del Reporte Consolidado (Sección 2 del Formulario)
+  numero_rds: {
     type: String,
-    required: true,
+    default: 'SEGURA-EP-GASGEC-SS-2026-041 (Lluvias)',
+    trim: true,
   },
-  // N:N con Usuarios (Colaboradores que han aportado al reporte)
+  fecha_reporte: {
+    type: String,
+    default: () => new Date().toISOString().split('T')[0],
+  },
+  hora_inicio: {
+    type: String,
+    default: '06:00',
+  },
+  hora_fin: {
+    type: String,
+    default: '22:00',
+  },
+  revisado_por: {
+    type: String,
+    default: 'Jefe de Sala Situacional | MSc. Ing. Santiago Jaramillo',
+    trim: true,
+  },
+  cabecera: {
+    type: String,
+    default: 'REPORTE DE NOVEDADES POR LLUVIAS INICIAL: 07/05/2026 21h30',
+    trim: true,
+  },
+  periodo: {
+    type: String,
+    default: 'Durante la noche del 7 de mayo se han registrado las siguientes novedades en el cantón Guayaquil por efecto de las lluvias:',
+    trim: true,
+  },
+  inocar_fecha: {
+    type: String,
+    default: '7 de mayo',
+    trim: true,
+  },
+  inocar_pleamar: {
+    type: String,
+    default: 'a las 22h42 con 4.13m',
+    trim: true,
+  },
+  inocar_bajamar: {
+    type: String,
+    default: 'a las 05h27 del 08/05/2026 con 0.79m',
+    trim: true,
+  },
+  // N:N con Usuarios (Colaboradores que han aportado novedades al reporte)
   colaboradores: [colaboradorSchema],
-  // 1:N con Novedades
+  // 1:N con Novedades (cada una con su respectivo usuario_id y fotos)
   novedades: [novedadSchema],
-  // Campo computado / persistido de autoría
+  // Campo computado / persistido de autoría derivado de los usuarios de las novedades
   elaborado_por: {
     type: String,
     default: '',
@@ -151,14 +201,24 @@ const reporteSchema = new mongoose.Schema({
   }
 });
 
-// Hook pre save sin callback next
+// Hook pre save para computar elaborado_por y actualizar colaboradores desde las novedades
 reporteSchema.pre('save', function() {
   this.actualizado_en = new Date();
-  if (this.colaboradores && this.colaboradores.length > 0) {
+  
+  if (this.novedades && this.novedades.length > 0) {
+    const autoresNovedades = [...new Set(
+      this.novedades
+        .map(n => n.usuario_nombre)
+        .filter(Boolean)
+    )];
+    if (autoresNovedades.length > 0) {
+      this.elaborado_por = autoresNovedades.join(' – ');
+    }
+  } else if (this.colaboradores && this.colaboradores.length > 0) {
     const nombresUnicos = [...new Set(this.colaboradores.map(c => c.nombre || c.correo))];
-    this.elaborado_por = nombresUnicos.join(', ');
-  } else if (this.creador_nombre) {
-    this.elaborado_por = this.creador_nombre;
+    this.elaborado_por = nombresUnicos.join(' – ');
+  } else {
+    this.elaborado_por = '';
   }
 });
 
