@@ -5,7 +5,7 @@ const { protegerRuta, validarScriptToken } = require('../middlewares/authMiddlew
 
 /**
  * @openapi
- * /api/auth/registro:
+ * /auth/registro:
  *   post:
  *     summary: Registrar un nuevo usuario/operador
  *     tags: [Autenticación]
@@ -29,7 +29,7 @@ router.post('/registro', validarScriptToken, authController.registrar);
 
 /**
  * @openapi
- * /api/auth/login:
+ * /auth/login:
  *   post:
  *     summary: Iniciar sesión y obtener JWT
  *     tags: [Autenticación]
@@ -53,7 +53,7 @@ router.post('/login', validarScriptToken, authController.login);
 
 /**
  * @openapi
- * /api/auth/logout:
+ * /auth/logout:
  *   post:
  *     summary: Cerrar sesión activa (1:N)
  *     tags: [Autenticación]
@@ -68,7 +68,7 @@ router.post('/logout', protegerRuta, authController.logout);
 
 /**
  * @openapi
- * /api/auth/perfil:
+ * /auth/perfil:
  *   get:
  *     summary: Obtener perfil del usuario autenticado
  *     tags: [Autenticación]

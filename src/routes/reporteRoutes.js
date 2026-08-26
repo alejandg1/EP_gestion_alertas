@@ -6,7 +6,7 @@ const upload = require('../middlewares/uploadMiddleware');
 
 /**
  * @openapi
- * /api/reportes:
+ * /reportes:
  *   get:
  *     summary: Listar todos los reportes con colaboradores (N:N) y novedades (1:N)
  *     tags: [Reportes]
@@ -37,7 +37,7 @@ router.post('/', protegerRuta, reporteController.crearReporte);
 
 /**
  * @openapi
- * /api/reportes/upload-foto:
+ * /reportes/upload-foto:
  *   post:
  *     summary: Subir fotografías de novedad al servidor local (Máx. 2 imágenes, 5MB c/u)
  *     tags: [Reportes]
@@ -66,7 +66,7 @@ router.post('/upload-foto', protegerRuta, upload.array('fotos', 2), reporteContr
 
 /**
  * @openapi
- * /api/reportes/{id}:
+ * /reportes/{id}:
  *   get:
  *     summary: Obtener reporte por ID con sus novedades y colaboradores
  *     tags: [Reportes]
@@ -90,7 +90,7 @@ router.get('/:id', protegerRuta, reporteController.obtenerReporte);
 
 /**
  * @openapi
- * /api/reportes/{id}/parametros:
+ * /reportes/{id}/parametros:
  *   put:
  *     summary: Actualizar parámetros institucionales del reporte (Sección 2 - RDS e INOCAR)
  *     tags: [Reportes]
@@ -120,7 +120,7 @@ router.put('/:id/parametros', protegerRuta, reporteController.actualizarParametr
 
 /**
  * @openapi
- * /api/reportes/{id}/novedades:
+ * /reportes/{id}/novedades:
  *   post:
  *     summary: Agregar una novedad al reporte (1:N) vinculada directamente al Usuario con fotos
  *     tags: [Reportes]
@@ -169,7 +169,7 @@ router.post('/:id/novedades', protegerRuta, upload.array('fotos', 2), reporteCon
 
 /**
  * @openapi
- * /api/reportes/{id}/exportar-excel:
+ * /reportes/{id}/exportar-excel:
  *   post:
  *     summary: Registrar y sincronizar novedades del reporte en el Excel de SharePoint (42 columnas)
  *     tags: [Reportes]

@@ -2,13 +2,11 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Asegurar que el directorio de destino exista
 const uploadDir = path.join(__dirname, '../../uploads/fotos');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Configuración de almacenamiento en disco
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDir);
@@ -20,7 +18,6 @@ const storage = multer.diskStorage({
   },
 });
 
-// Filtro de tipos de archivo (solo imágenes)
 const fileFilter = (req, file, cb) => {
   const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/jpg'];
   if (allowedMimeTypes.includes(file.mimetype)) {
@@ -34,7 +31,7 @@ const upload = multer({
   storage,
   fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB máximo por fotografía
+    fileSize: 5 * 1024 * 1024, // 5MB
     files: 2, // Máximo 2 fotos por novedad
   },
 });

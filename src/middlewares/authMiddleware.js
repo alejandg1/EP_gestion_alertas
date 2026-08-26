@@ -7,7 +7,6 @@ const protegerRuta = async (req, res, next) => {
     const scriptTokenHeader = req.headers['x-api-token'] || req.query.api_token;
     const requiredScriptToken = (process.env.SCRIPT_API_TOKEN || '').trim();
 
-    // 1. Verificación del SCRIPT_API_TOKEN del .env
     if (requiredScriptToken) {
       if (!scriptTokenHeader || scriptTokenHeader.trim() !== requiredScriptToken) {
         return res.status(403).json({
@@ -17,7 +16,6 @@ const protegerRuta = async (req, res, next) => {
       }
     }
 
-    // 2. Extracción del token de usuario (JWT de sesión)
     let token;
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -38,7 +36,6 @@ const protegerRuta = async (req, res, next) => {
       return res.status(401).json({ ok: false, mensaje: 'Sesión expirada o inválida' });
     }
 
-    // Actualizar fecha de último acceso de la sesión
     sesion.ultimo_acceso = new Date();
     await sesion.save();
 
@@ -55,7 +52,6 @@ const protegerRuta = async (req, res, next) => {
   }
 };
 
-// Middleware para proteger endpoints públicos como registro/login exigiendo el SCRIPT_API_TOKEN
 const validarScriptToken = (req, res, next) => {
   const scriptTokenHeader = req.headers['x-api-token'] || req.query.api_token;
   const requiredScriptToken = (process.env.SCRIPT_API_TOKEN || '').trim();

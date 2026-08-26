@@ -3,12 +3,11 @@
   "info": {
     "title": "API Sala Situacional - Sistema Colaborativo de Alertas",
     "version": "1.0.0",
-    "description": "Documentación OpenAPI interactiva para el sistema de alertas de Segura EP. Requiere el SCRIPT_API_TOKEN institucional y JWT de sesión."
+    "description": "Documentación OpenAPI interactiva para el sistema de alertas sala situacional Segura EP."
   },
   "servers": [
     {
-      "url": "http://localhost:3088",
-      "description": "Servidor Local"
+      "url": "http://10.10.80.70:3090"
     }
   ],
   "components": {
@@ -148,7 +147,7 @@
     }
   ],
   "paths": {
-    "/api/reportes": {
+    "/reportes": {
       "get": {
         "summary": "Listar todos los reportes con colaboradores (N:N) y novedades (1:N)",
         "tags": [
@@ -198,7 +197,7 @@
         }
       }
     },
-    "/api/reportes/{id}": {
+    "/reportes/{id}": {
       "get": {
         "summary": "Obtener reporte por ID con sus novedades y colaboradores",
         "tags": [
@@ -233,9 +232,9 @@
         }
       }
     },
-    "/api/reportes/{id}/novedades": {
+    "/reportes/{id}/novedades": {
       "post": {
-        "summary": "Agregar una novedad al reporte (1:N) y registrar al colaborador (N:N)",
+        "summary": "Agregar una novedad al reporte y registrar al colaborador",
         "tags": [
           "Reportes"
         ],
@@ -275,9 +274,9 @@
         }
       }
     },
-    "/api/reportes/{id}/exportar-excel": {
+    "/reportes/{id}/exportar-excel": {
       "post": {
-        "summary": "Registrar y sincronizar novedades del reporte en el Excel de SharePoint (42 columnas)",
+        "summary": "Registrar y sincronizar novedades del reporte en el Excel de SharePoint",
         "tags": [
           "Reportes"
         ],
@@ -313,7 +312,7 @@
         }
       }
     },
-    "/api/auth/registro": {
+    "/auth/registro": {
       "post": {
         "summary": "Registrar un nuevo usuario/operador",
         "tags": [
@@ -347,7 +346,7 @@
         }
       }
     },
-    "/api/auth/login": {
+    "/auth/login": {
       "post": {
         "summary": "Iniciar sesión y obtener JWT",
         "tags": [
@@ -381,7 +380,7 @@
         }
       }
     },
-    "/api/auth/logout": {
+    "/auth/logout": {
       "post": {
         "summary": "Cerrar sesión activa (1:N)",
         "tags": [
@@ -402,7 +401,7 @@
         }
       }
     },
-    "/api/auth/perfil": {
+    "/auth/perfil": {
       "get": {
         "summary": "Obtener perfil del usuario autenticado",
         "tags": [

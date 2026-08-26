@@ -2,17 +2,14 @@ const jwt = require('jsonwebtoken');
 const Reporte = require('../models/Reporte');
 const Auditoria = require('../models/Auditoria');
 
-// Estado en memoria de bloqueos y usuarios activos por reporte
 const locksPorReporte = new Map();
 const usuariosEnReporte = new Map();
 
 function initCollaborationSockets(io) {
-  // Middleware de autenticación para WebSockets con SCRIPT_API_TOKEN y JWT
   io.use((socket, next) => {
     const scriptToken = socket.handshake.auth?.api_token || socket.handshake.query?.api_token || socket.handshake.headers?.['x-api-token'];
     const requiredScriptToken = (process.env.SCRIPT_API_TOKEN || '').trim();
 
-    // Validar SCRIPT_API_TOKEN del .env
     if (requiredScriptToken) {
       if (!scriptToken || scriptToken.trim() !== requiredScriptToken) {
         return next(new Error('Acceso denegado: SCRIPT_API_TOKEN inválido para WebSocket'));
@@ -36,13 +33,11 @@ function initCollaborationSockets(io) {
   io.on('connection', (socket) => {
     const usuario = socket.usuario;
 
-    // 1. Unirse a la sala de un reporte específico
     socket.on('unirse_reporte', async ({ reporteId }) => {
       try {
         socket.join(`reporte_${reporteId}`);
         socket.reporteActual = reporteId;
 
-        // Registrar usuario activo en memoria de la sala
         if (!usuariosEnReporte.has(reporteId)) {
           usuariosEnReporte.set(reporteId, new Map());
         }
@@ -52,14 +47,12 @@ function initCollaborationSockets(io) {
           correo: usuario.correo,
         });
 
-        // Asegurar que exista mapa de locks para este reporte
         if (!locksPorReporte.has(reporteId)) {
           locksPorReporte.set(reporteId, {});
         }
 
-        // Obtener estado actual del reporte desde MongoDB
         const reporte = await Reporte.findById(reporteId);
-        
+
         socket.emit('reporte_cargado', {
           reporte,
           locks: locksPorReporte.get(reporteId),
@@ -75,7 +68,6 @@ function initCollaborationSockets(io) {
       }
     });
 
-    // 2. Bloqueo de campo para evitar Race Conditions (Lock)
     socket.on('lock_campo', ({ reporteId, campoKey }) => {
       if (!locksPorReporte.has(reporteId)) {
         locksPorReporte.set(reporteId, {});
@@ -104,7 +96,6 @@ function initCollaborationSockets(io) {
       });
     });
 
-    // 3. Liberar bloqueo de campo (Unlock)
     socket.on('unlock_campo', ({ reporteId, campoKey }) => {
       const locks = locksPorReporte.get(reporteId);
       if (locks && locks[campoKey] && locks[campoKey].usuarioId === usuario.id) {
@@ -113,7 +104,6 @@ function initCollaborationSockets(io) {
       }
     });
 
-    // 4. Agregar Novedad en tiempo real (1:N) con actualización atómica y autores (N:N)
     socket.on('agregar_novedad', async ({ reporteId, novedad }) => {
       try {
         const reporte = await Reporte.findById(reporteId);
@@ -139,7 +129,6 @@ function initCollaborationSockets(io) {
 
         reporte.novedades.push(nuevaNovedad);
 
-        // Actualizar colaborador en N:N
         const colabIndex = reporte.colaboradores.findIndex(c => c.usuario_id.toString() === usuario.id);
         if (colabIndex >= 0) {
           reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
@@ -168,7 +157,6 @@ function initCollaborationSockets(io) {
       }
     });
 
-    // 5. Actualizar parámetros institucionales en tiempo real
     socket.on('actualizar_parametros', async ({ reporteId, parametros }) => {
       try {
         const reporte = await Reporte.findById(reporteId);
@@ -198,7 +186,6 @@ function initCollaborationSockets(io) {
       }
     });
 
-    // 6. Desconexión y limpieza de locks
     socket.on('disconnect', () => {
       const reporteId = socket.reporteActual;
       if (reporteId) {
