@@ -3,7 +3,6 @@ const Usuario = require('../models/Usuario');
 const Sesion = require('../models/Sesion');
 const Auditoria = require('../models/Auditoria');
 
-// Generar Token JWT
 const generarToken = (usuario) => {
   const secret = process.env.JWT_SECRET || 'fallback_secret_key';
   return jwt.sign(
@@ -13,7 +12,6 @@ const generarToken = (usuario) => {
   );
 };
 
-// Registro de usuario
 exports.registrar = async (req, res) => {
   try {
     const { correo, password, nombre } = req.body;
@@ -36,7 +34,6 @@ exports.registrar = async (req, res) => {
 
     await nuevoUsuario.save();
 
-    // Crear sesión inicial
     const token = generarToken(nuevoUsuario);
     const sesion = new Sesion({
       usuario_id: nuevoUsuario._id,
@@ -46,7 +43,6 @@ exports.registrar = async (req, res) => {
     });
     await sesion.save();
 
-    // Auditoría
     await Auditoria.create({
       usuario_id: nuevoUsuario._id,
       usuario_correo: nuevoUsuario.correo,
@@ -73,7 +69,6 @@ exports.registrar = async (req, res) => {
   }
 };
 
-// Login de usuario
 exports.login = async (req, res) => {
   try {
     const { correo, password } = req.body;
@@ -93,7 +88,6 @@ exports.login = async (req, res) => {
       return res.status(401).json({ ok: false, mensaje: 'Credenciales inválidas' });
     }
 
-    // Registrar nueva sesión (1:N)
     const token = generarToken(usuario);
     const sesion = new Sesion({
       usuario_id: usuario._id,
@@ -103,7 +97,6 @@ exports.login = async (req, res) => {
     });
     await sesion.save();
 
-    // Auditoría
     await Auditoria.create({
       usuario_id: usuario._id,
       usuario_correo: usuario.correo,
@@ -130,7 +123,6 @@ exports.login = async (req, res) => {
   }
 };
 
-// Logout
 exports.logout = async (req, res) => {
   try {
     if (req.sesionId) {
@@ -142,7 +134,6 @@ exports.logout = async (req, res) => {
   }
 };
 
-// Obtener perfil actual
 exports.perfil = async (req, res) => {
   return res.json({
     ok: true,

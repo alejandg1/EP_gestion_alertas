@@ -17,7 +17,7 @@ const usuarioSchema = new mongoose.Schema({
   nombre: {
     type: String,
     trim: true,
-    default: function() {
+    default: function () {
       return this.correo ? this.correo.split('@')[0] : 'Operador';
     }
   },
@@ -37,14 +37,13 @@ const usuarioSchema = new mongoose.Schema({
 });
 
 // Hash de contraseña antes de guardar
-usuarioSchema.pre('save', async function() {
+usuarioSchema.pre('save', async function () {
   if (!this.isModified('password')) return;
   const salt = await bcrypt.genSalt(10);
   this.password = await bcrypt.hash(this.password, salt);
 });
 
-// Metodo para verificar contrasena
-usuarioSchema.methods.compararPassword = async function(candidata) {
+usuarioSchema.methods.compararPassword = async function (candidata) {
   return await bcrypt.compare(candidata, this.password);
 };
 

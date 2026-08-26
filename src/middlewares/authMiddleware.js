@@ -1,21 +1,9 @@
-﻿const jwt = require('jsonwebtoken');
+const jwt = require('jsonwebtoken');
 const Sesion = require('../models/Sesion');
 const Usuario = require('../models/Usuario');
 
 const protegerRuta = async (req, res, next) => {
   try {
-    const scriptTokenHeader = req.headers['x-api-token'] || req.query.api_token;
-    const requiredScriptToken = (process.env.SCRIPT_API_TOKEN || '').trim();
-
-    if (requiredScriptToken) {
-      if (!scriptTokenHeader || scriptTokenHeader.trim() !== requiredScriptToken) {
-        return res.status(403).json({
-          ok: false,
-          mensaje: 'Acceso denegado: Token de sistema (SCRIPT_API_TOKEN) ausente o inválido'
-        });
-      }
-    }
-
     let token;
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -25,7 +13,7 @@ const protegerRuta = async (req, res, next) => {
     }
 
     if (!token) {
-      return res.status(401).json({ ok: false, mensaje: 'Acceso no autorizado: falta token de usuario' });
+      return res.status(401).json({ ok: false, mensaje: 'Acceso no autorizado: falta token JWT de usuario' });
     }
 
     const secret = (process.env.JWT_SECRET || 'fallback_secret_key').trim();
@@ -48,23 +36,8 @@ const protegerRuta = async (req, res, next) => {
     req.sesionId = sesion._id;
     next();
   } catch (error) {
-    return res.status(401).json({ ok: false, mensaje: 'Token inválido o expirado', error: error.message });
+    return res.status(401).json({ ok: false, mensaje: 'Token JWT inválido o expirado', error: error.message });
   }
 };
 
-const validarScriptToken = (req, res, next) => {
-  const scriptTokenHeader = req.headers['x-api-token'] || req.query.api_token;
-  const requiredScriptToken = (process.env.SCRIPT_API_TOKEN || '').trim();
-
-  if (requiredScriptToken) {
-    if (!scriptTokenHeader || scriptTokenHeader.trim() !== requiredScriptToken) {
-      return res.status(403).json({
-        ok: false,
-        mensaje: 'Acceso denegado: Token de sistema (SCRIPT_API_TOKEN) ausente o inválido'
-      });
-    }
-  }
-  next();
-};
-
-module.exports = { protegerRuta, validarScriptToken };
+module.exports = { protegerRuta };

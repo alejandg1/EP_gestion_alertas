@@ -1,7 +1,7 @@
-﻿const express = require('express');
+const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
-const { protegerRuta, validarScriptToken } = require('../middlewares/authMiddleware');
+const { protegerRuta } = require('../middlewares/authMiddleware');
 
 /**
  * @openapi
@@ -9,8 +9,6 @@ const { protegerRuta, validarScriptToken } = require('../middlewares/authMiddlew
  *   post:
  *     summary: Registrar un nuevo usuario/operador
  *     tags: [Autenticación]
- *     security:
- *       - ApiKeyAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -22,10 +20,8 @@ const { protegerRuta, validarScriptToken } = require('../middlewares/authMiddlew
  *         description: Usuario registrado exitosamente
  *       400:
  *         description: Datos inválidos o correo ya registrado
- *       403:
- *         description: SCRIPT_API_TOKEN inválido o ausente
  */
-router.post('/registro', validarScriptToken, authController.registrar);
+router.post('/registro', authController.registrar);
 
 /**
  * @openapi
@@ -33,8 +29,6 @@ router.post('/registro', validarScriptToken, authController.registrar);
  *   post:
  *     summary: Iniciar sesión y obtener JWT
  *     tags: [Autenticación]
- *     security:
- *       - ApiKeyAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -46,10 +40,8 @@ router.post('/registro', validarScriptToken, authController.registrar);
  *         description: Inicio de sesión exitoso (devuelve token JWT)
  *       401:
  *         description: Credenciales incorrectas
- *       403:
- *         description: SCRIPT_API_TOKEN inválido o ausente
  */
-router.post('/login', validarScriptToken, authController.login);
+router.post('/login', authController.login);
 
 /**
  * @openapi
@@ -58,7 +50,6 @@ router.post('/login', validarScriptToken, authController.login);
  *     summary: Cerrar sesión activa (1:N)
  *     tags: [Autenticación]
  *     security:
- *       - ApiKeyAuth: []
  *       - BearerAuth: []
  *     responses:
  *       200:
@@ -73,7 +64,6 @@ router.post('/logout', protegerRuta, authController.logout);
  *     summary: Obtener perfil del usuario autenticado
  *     tags: [Autenticación]
  *     security:
- *       - ApiKeyAuth: []
  *       - BearerAuth: []
  *     responses:
  *       200:

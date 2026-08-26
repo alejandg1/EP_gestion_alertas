@@ -7,18 +7,9 @@ const usuariosEnReporte = new Map();
 
 function initCollaborationSockets(io) {
   io.use((socket, next) => {
-    const scriptToken = socket.handshake.auth?.api_token || socket.handshake.query?.api_token || socket.handshake.headers?.['x-api-token'];
-    const requiredScriptToken = (process.env.SCRIPT_API_TOKEN || '').trim();
-
-    if (requiredScriptToken) {
-      if (!scriptToken || scriptToken.trim() !== requiredScriptToken) {
-        return next(new Error('Acceso denegado: SCRIPT_API_TOKEN inválido para WebSocket'));
-      }
-    }
-
     const token = socket.handshake.auth?.token || socket.handshake.query?.token;
     if (!token) {
-      return next(new Error('Autenticación requerida para WebSocket: falta token de usuario'));
+      return next(new Error('Autenticación requerida para WebSocket: falta token JWT'));
     }
     try {
       const secret = (process.env.JWT_SECRET || 'fallback_secret_key').trim();
@@ -26,7 +17,7 @@ function initCollaborationSockets(io) {
       socket.usuario = decoded;
       next();
     } catch (err) {
-      next(new Error('Token de usuario inválido en WebSocket'));
+      next(new Error('Token JWT de usuario inválido en WebSocket'));
     }
   });
 

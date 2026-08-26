@@ -84,7 +84,6 @@ const novedadSchema = new mongoose.Schema({
   }
 });
 
-// Subesquema de Colaborador (N:N con Usuarios derivado de aportes/novedades)
 const colaboradorSchema = new mongoose.Schema({
   usuario_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -130,7 +129,6 @@ const reporteSchema = new mongoose.Schema({
     enum: ['BORRADOR', 'ACTIVO', 'FINALIZADO', 'EXPORTADO_EXCEL'],
     default: 'ACTIVO',
   },
-  // Parámetros institucionales del Reporte Consolidado (Sección 2 del Formulario)
   numero_rds: {
     type: String,
     default: 'SEGURA-EP-GASGEC-SS-2026-041 (Lluvias)',
@@ -178,11 +176,8 @@ const reporteSchema = new mongoose.Schema({
     default: 'a las 05h27 del 08/05/2026 con 0.79m',
     trim: true,
   },
-  // N:N con Usuarios (Colaboradores que han aportado novedades al reporte)
   colaboradores: [colaboradorSchema],
-  // 1:N con Novedades (cada una con su respectivo usuario_id y fotos)
   novedades: [novedadSchema],
-  // Campo computado / persistido de autoría derivado de los usuarios de las novedades
   elaborado_por: {
     type: String,
     default: '',
@@ -202,9 +197,9 @@ const reporteSchema = new mongoose.Schema({
 });
 
 // Hook pre save para computar elaborado_por y actualizar colaboradores desde las novedades
-reporteSchema.pre('save', function() {
+reporteSchema.pre('save', function () {
   this.actualizado_en = new Date();
-  
+
   if (this.novedades && this.novedades.length > 0) {
     const autoresNovedades = [...new Set(
       this.novedades

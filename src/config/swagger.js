@@ -19,14 +19,13 @@ Este backend combina endpoints REST para operaciones transaccionales (autenticac
 * **Path por defecto:** \`/socket.io/\`
 
 #### Autenticacion en el Handshake
-El WebSocket valida el token institucional y el JWT de sesion del operador:
+El WebSocket valida el JWT de sesion del operador:
 \`\`\`javascript
 import { io } from 'socket.io-client';
 
 const socket = io('http://localhost:3090', {
   auth: {
-    api_token: 'TU_SCRIPT_API_TOKEN', // Token del archivo .env
-    token: 'TOKEN_JWT_DEL_LOGIN'        // Obtenido en POST /api/auth/login
+    token: 'TOKEN_JWT_DEL_LOGIN' // Obtenido en POST /auth/login
   }
 });
 \`\`\`
@@ -65,17 +64,11 @@ const socket = io('http://localhost:3090', {
     ],
     components: {
       securitySchemes: {
-        ApiKeyAuth: {
-          type: 'apiKey',
-          in: 'header',
-          name: 'x-api-token',
-          description: 'Token de sistema del .env (SCRIPT_API_TOKEN)',
-        },
         BearerAuth: {
           type: 'http',
           scheme: 'bearer',
           bearerFormat: 'JWT',
-          description: 'Token JWT obtenido tras el inicio de sesión',
+          description: 'Token JWT obtenido tras el inicio de sesión (/auth/login)',
         },
       },
       schemas: {

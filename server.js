@@ -32,32 +32,11 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-const defaultScriptToken = (process.env.SCRIPT_API_TOKEN || '').trim();
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customSiteTitle: 'Swagger - Sala Situacional Segura EP',
   swaggerOptions: {
     persistAuthorization: true,
-    authAction: {
-      ApiKeyAuth: {
-        name: 'ApiKeyAuth',
-        schema: {
-          type: 'apiKey',
-          in: 'header',
-          name: 'x-api-token'
-        },
-        value: defaultScriptToken
-      }
-    }
-  },
-  customJsStr: `
-    window.addEventListener('load', function() {
-      setTimeout(function() {
-        if (window.ui && typeof window.ui.preauthorizeApiKey === 'function') {
-          window.ui.preauthorizeApiKey('ApiKeyAuth', '${defaultScriptToken}');
-        }
-      }, 500);
-    });
-  `
+  }
 }));
 
 app.get('/docs.json', (req, res) => {

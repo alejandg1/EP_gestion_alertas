@@ -11,7 +11,6 @@ const upload = require('../middlewares/uploadMiddleware');
  *     summary: Listar todos los reportes con colaboradores (N:N) y novedades (1:N)
  *     tags: [Reportes]
  *     security:
- *       - ApiKeyAuth: []
  *       - BearerAuth: []
  *     responses:
  *       200:
@@ -20,7 +19,6 @@ const upload = require('../middlewares/uploadMiddleware');
  *     summary: Crear un nuevo reporte
  *     tags: [Reportes]
  *     security:
- *       - ApiKeyAuth: []
  *       - BearerAuth: []
  *     requestBody:
  *       required: true
@@ -42,7 +40,6 @@ router.post('/', protegerRuta, reporteController.crearReporte);
  *     summary: Subir fotografías de novedad al servidor local (Máx. 2 imágenes, 5MB c/u)
  *     tags: [Reportes]
  *     security:
- *       - ApiKeyAuth: []
  *       - BearerAuth: []
  *     requestBody:
  *       required: true
@@ -71,7 +68,6 @@ router.post('/upload-foto', protegerRuta, upload.array('fotos', 2), reporteContr
  *     summary: Obtener reporte por ID con sus novedades y colaboradores
  *     tags: [Reportes]
  *     security:
- *       - ApiKeyAuth: []
  *       - BearerAuth: []
  *     parameters:
  *       - in: path
@@ -95,7 +91,6 @@ router.get('/:id', protegerRuta, reporteController.obtenerReporte);
  *     summary: Actualizar parámetros institucionales del reporte (Sección 2 - RDS e INOCAR)
  *     tags: [Reportes]
  *     security:
- *       - ApiKeyAuth: []
  *       - BearerAuth: []
  *     parameters:
  *       - in: path
@@ -125,7 +120,6 @@ router.put('/:id/parametros', protegerRuta, reporteController.actualizarParametr
  *     summary: Agregar una novedad al reporte (1:N) vinculada directamente al Usuario con fotos
  *     tags: [Reportes]
  *     security:
- *       - ApiKeyAuth: []
  *       - BearerAuth: []
  *     parameters:
  *       - in: path
@@ -174,7 +168,6 @@ router.post('/:id/novedades', protegerRuta, upload.array('fotos', 2), reporteCon
  *     summary: Registrar y sincronizar novedades del reporte en el Excel de SharePoint (42 columnas)
  *     tags: [Reportes]
  *     security:
- *       - ApiKeyAuth: []
  *       - BearerAuth: []
  *     parameters:
  *       - in: path

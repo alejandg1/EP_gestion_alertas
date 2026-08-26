@@ -2,7 +2,6 @@ const Reporte = require('../models/Reporte');
 const Auditoria = require('../models/Auditoria');
 const { sharepointService, COLUMNAS_EXCEL } = require('../services/sharepointService');
 
-// Generar codigo correlativo de reporte (Ej: REP-202608-001)
 const generarCodigoReporte = async () => {
   const d = new Date();
   const yearMonth = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -11,20 +10,18 @@ const generarCodigoReporte = async () => {
   return `REP-${yearMonth}-${correlativo}`;
 };
 
-// Listar reportes con paginacion y colaboradores
 exports.listarReportes = async (req, res) => {
   try {
     const reportes = await Reporte.find()
       .sort({ actualizado_en: -1 })
       .select('codigo titulo estado numero_rds fecha_reporte hora_inicio hora_fin revisado_por cabecera periodo inocar_fecha inocar_pleamar inocar_bajamar elaborado_por colaboradores novedades creado_en actualizado_en');
-    
+
     return res.json({ ok: true, total: reportes.length, reportes });
   } catch (error) {
     return res.status(500).json({ ok: false, mensaje: 'Error al listar reportes', error: error.message });
   }
 };
 
-// Crear nuevo reporte contenedor con parámetros institucionales
 exports.crearReporte = async (req, res) => {
   try {
     const {
@@ -66,7 +63,6 @@ exports.crearReporte = async (req, res) => {
 
     await nuevoReporte.save();
 
-    // Auditoria
     await Auditoria.create({
       usuario_id: usuario._id,
       usuario_correo: usuario.correo,
@@ -82,7 +78,6 @@ exports.crearReporte = async (req, res) => {
   }
 };
 
-// Actualizar parámetros institucionales de un reporte existente
 exports.actualizarParametros = async (req, res) => {
   try {
     const { id } = req.params;
@@ -106,7 +101,6 @@ exports.actualizarParametros = async (req, res) => {
 
     await reporte.save();
 
-    // Auditoria
     await Auditoria.create({
       usuario_id: usuario._id,
       usuario_correo: usuario.correo,
@@ -122,7 +116,6 @@ exports.actualizarParametros = async (req, res) => {
   }
 };
 
-// Obtener reporte por ID con novedades y colaboradores
 exports.obtenerReporte = async (req, res) => {
   try {
     const { id } = req.params;
@@ -138,7 +131,6 @@ exports.obtenerReporte = async (req, res) => {
   }
 };
 
-// Subida de fotografías al sistema de archivos local del servidor
 exports.subirFotos = async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
@@ -161,7 +153,6 @@ exports.subirFotos = async (req, res) => {
   }
 };
 
-// Agregar Novedad a un Reporte (1:N) vinculada directamente al Usuario
 exports.agregarNovedad = async (req, res) => {
   try {
     const { id } = req.params;
@@ -173,7 +164,6 @@ exports.agregarNovedad = async (req, res) => {
       return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
     }
 
-    // Extraer fotos si vinieron en multipart (req.files) o como array de rutas en JSON (req.body.fotos)
     let fotosArray = [];
     if (req.files && req.files.length > 0) {
       fotosArray = req.files.map(f => `/uploads/fotos/${f.filename}`);
@@ -203,7 +193,6 @@ exports.agregarNovedad = async (req, res) => {
       descripcion: datosNovedad.descripcion || '',
       acciones_inmediatas: datosNovedad.acciones_inmediatas || '',
       fotos: fotosArray,
-      // Campos especificos del formato Excel
       ficha: datosNovedad.ficha || '',
       camara_cvvc: datosNovedad.camara_cvvc || '',
       desaparecidos: datosNovedad.desaparecidos || 0,
@@ -237,7 +226,6 @@ exports.agregarNovedad = async (req, res) => {
 
     reporte.novedades.push(nuevaNovedad);
 
-    // Actualizar relacion N:N de colaboradores
     const colabIndex = reporte.colaboradores.findIndex(c => c.usuario_id.toString() === usuario._id.toString());
     if (colabIndex >= 0) {
       reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
@@ -255,7 +243,6 @@ exports.agregarNovedad = async (req, res) => {
 
     await reporte.save();
 
-    // Auditoria
     await Auditoria.create({
       usuario_id: usuario._id,
       usuario_correo: usuario.correo,
@@ -271,7 +258,6 @@ exports.agregarNovedad = async (req, res) => {
   }
 };
 
-// Exportar/Sincronizar Novedades del Reporte al Excel de SharePoint
 exports.exportarAExcel = async (req, res) => {
   try {
     const { id } = req.params;
@@ -288,11 +274,9 @@ exports.exportarAExcel = async (req, res) => {
 
     const resultado = await sharepointService.registrarReporteEnExcel(reporte);
 
-    // Actualizar estado del reporte
     reporte.estado = 'EXPORTADO_EXCEL';
     await reporte.save();
 
-    // Auditoria
     await Auditoria.create({
       usuario_id: usuario._id,
       usuario_correo: usuario.correo,
