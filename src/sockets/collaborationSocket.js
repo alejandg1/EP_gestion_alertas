@@ -165,11 +165,32 @@ function initCollaborationSockets(io) {
           }
         });
 
+        // Registrar o actualizar al usuario modificador como colaborador
+        if (usuario && usuario.id) {
+          const colabIndex = reporte.colaboradores.findIndex(
+            c => c.usuario_id.toString() === usuario.id.toString()
+          );
+          if (colabIndex >= 0) {
+            reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
+            reporte.colaboradores[colabIndex].total_ediciones += 1;
+          } else {
+            reporte.colaboradores.push({
+              usuario_id: usuario.id,
+              nombre: usuario.nombre || usuario.correo,
+              correo: usuario.correo,
+              primer_aporte: new Date(),
+              ultimo_aporte: new Date(),
+              total_ediciones: 1,
+            });
+          }
+        }
+
         await reporte.save();
 
         io.to(`reporte_${reporteId}`).emit('parametros_actualizados', {
           reporteId,
           parametros,
+          colaboradores: reporte.colaboradores,
           actualizadoPor: usuario.nombre || usuario.correo,
         });
       } catch (err) {

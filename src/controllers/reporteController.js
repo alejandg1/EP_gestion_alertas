@@ -1,4 +1,6 @@
+const mongoose = require('mongoose');
 const Reporte = require('../models/Reporte');
+const Usuario = require('../models/Usuario');
 const Auditoria = require('../models/Auditoria');
 const { sharepointService, COLUMNAS_EXCEL } = require('../services/sharepointService');
 
@@ -37,35 +39,116 @@ exports.crearReporte = async (req, res) => {
       inocar_fecha,
       inocar_pleamar,
       inocar_bajamar,
+      usuario_id,
+      colaborador_id,
+      correo_colaborador,
+      colaborador_correo,
+      colaboradores: colaboradoresEntrantes,
     } = req.body;
-    const usuario = req.usuario;
+    const usuarioAuth = req.usuario;
+
+    const listaColaboradores = [];
+    const idsAgregados = new Set();
+
+    // 1. Agregar al usuario creador autenticado
+    if (usuarioAuth) {
+      listaColaboradores.push({
+        usuario_id: usuarioAuth._id,
+        nombre: usuarioAuth.nombre || usuarioAuth.correo,
+        correo: usuarioAuth.correo,
+        primer_aporte: new Date(),
+        ultimo_aporte: new Date(),
+        total_ediciones: 1,
+      });
+      idsAgregados.add(String(usuarioAuth._id));
+    }
+
+    // 2. Procesar usuario_id / colaborador_id enviado en el body
+    const targetUserId = usuario_id || colaborador_id;
+    if (targetUserId && mongoose.Types.ObjectId.isValid(targetUserId)) {
+      const u = await Usuario.findById(targetUserId);
+      if (u && !idsAgregados.has(String(u._id))) {
+        listaColaboradores.push({
+          usuario_id: u._id,
+          nombre: u.nombre || u.correo,
+          correo: u.correo,
+          primer_aporte: new Date(),
+          ultimo_aporte: new Date(),
+          total_ediciones: 1,
+        });
+        idsAgregados.add(String(u._id));
+      }
+    }
+
+    // 3. Procesar correo_colaborador / colaborador_correo enviado en el body
+    const targetEmail = correo_colaborador || colaborador_correo;
+    if (targetEmail) {
+      const u = await Usuario.findOne({ correo: String(targetEmail).toLowerCase().trim() });
+      if (u && !idsAgregados.has(String(u._id))) {
+        listaColaboradores.push({
+          usuario_id: u._id,
+          nombre: u.nombre || u.correo,
+          correo: u.correo,
+          primer_aporte: new Date(),
+          ultimo_aporte: new Date(),
+          total_ediciones: 1,
+        });
+        idsAgregados.add(String(u._id));
+      }
+    }
+
+    // 4. Procesar array de colaboradores si se envía
+    if (Array.isArray(colaboradoresEntrantes)) {
+      for (const item of colaboradoresEntrantes) {
+        const uid = typeof item === 'string' ? item : item?.usuario_id || item?._id;
+        const uEmail = typeof item === 'object' ? item?.correo : null;
+
+        let u = null;
+        if (uid && mongoose.Types.ObjectId.isValid(uid)) {
+          u = await Usuario.findById(uid);
+        } else if (uEmail) {
+          u = await Usuario.findOne({ correo: String(uEmail).toLowerCase().trim() });
+        }
+
+        if (u && !idsAgregados.has(String(u._id))) {
+          listaColaboradores.push({
+            usuario_id: u._id,
+            nombre: u.nombre || u.correo,
+            correo: u.correo,
+            primer_aporte: new Date(),
+            ultimo_aporte: new Date(),
+            total_ediciones: 1,
+          });
+          idsAgregados.add(String(u._id));
+        }
+      }
+    }
 
     const codigo = await generarCodigoReporte();
 
     const nuevoReporte = new Reporte({
       codigo,
-      titulo: titulo || `Reporte de Alertas e Incidentes - ${new Date().toLocaleDateString()}`,
+      titulo: titulo || '',
       observaciones_generales: observaciones_generales || '',
-      numero_rds: numero_rds || 'SEGURA-EP-GASGEC-SS-2026-041 (Lluvias)',
+      numero_rds: numero_rds || '',
       fecha_reporte: fecha_reporte || new Date().toISOString().split('T')[0],
-      hora_inicio: hora_inicio || '06:00',
-      hora_fin: hora_fin || '22:00',
-      revisado_por: revisado_por || 'Jefe de Sala Situacional | MSc. Ing. Santiago Jaramillo',
-      cabecera: cabecera || 'REPORTE DE NOVEDADES POR LLUVIAS INICIAL: 07/05/2026 21h30',
-      periodo: periodo || 'Durante la noche del 7 de mayo se han registrado las siguientes novedades en el cantón Guayaquil por efecto de las lluvias:',
-      inocar_fecha: inocar_fecha || '7 de mayo',
-      inocar_pleamar: inocar_pleamar || 'a las 22h42 con 4.13m',
-      inocar_bajamar: inocar_bajamar || 'a las 05h27 del 08/05/2026 con 0.79m',
-      colaboradores: [],
-      elaborado_por: '',
+      hora_inicio: hora_inicio || '',
+      hora_fin: hora_fin || '',
+      revisado_por: revisado_por || '',
+      cabecera: cabecera || '',
+      periodo: periodo || '',
+      inocar_fecha: inocar_fecha || '',
+      inocar_pleamar: inocar_pleamar || '',
+      inocar_bajamar: inocar_bajamar || '',
+      colaboradores: listaColaboradores,
       novedades: []
     });
 
     await nuevoReporte.save();
 
     await Auditoria.create({
-      usuario_id: usuario._id,
-      usuario_correo: usuario.correo,
+      usuario_id: usuarioAuth._id,
+      usuario_correo: usuarioAuth.correo,
       reporte_id: nuevoReporte._id,
       entidad: 'REPORTE',
       accion: 'CREAR',
@@ -98,6 +181,27 @@ exports.actualizarParametros = async (req, res) => {
         reporte[campo] = req.body[campo];
       }
     });
+
+    // Registrar o actualizar al usuario modificador como colaborador
+    if (usuario) {
+      const colabIndex = reporte.colaboradores.findIndex(
+        c => String(c.usuario_id) === String(usuario._id)
+      );
+
+      if (colabIndex >= 0) {
+        reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
+        reporte.colaboradores[colabIndex].total_ediciones = (reporte.colaboradores[colabIndex].total_ediciones || 1) + 1;
+      } else {
+        reporte.colaboradores.push({
+          usuario_id: usuario._id,
+          nombre: usuario.nombre || usuario.correo,
+          correo: usuario.correo,
+          primer_aporte: new Date(),
+          ultimo_aporte: new Date(),
+          total_ediciones: 1,
+        });
+      }
+    }
 
     await reporte.save();
 

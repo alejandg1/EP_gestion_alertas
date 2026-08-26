@@ -114,6 +114,14 @@ const socket = io('http://localhost:3090', {
             inocar_fecha: { type: 'string', example: '7 de mayo' },
             inocar_pleamar: { type: 'string', example: 'a las 22h42 con 4.13m' },
             inocar_bajamar: { type: 'string', example: 'a las 05h27 del 08/05/2026 con 0.79m' },
+            usuario_id: { type: 'string', example: '66d8f1b38dcebf7429471b8a', description: 'ID de usuario para agregarlo como colaborador inicial' },
+            correo_colaborador: { type: 'string', example: 'operador2@segura.gob.ec', description: 'Correo del usuario a agregar como colaborador inicial' },
+            colaboradores: {
+              type: 'array',
+              items: { type: 'string' },
+              example: ['operador2@segura.gob.ec', 'operador3@segura.gob.ec'],
+              description: 'Lista de IDs o correos de colaboradores a vincular'
+            },
           },
         },
         ActualizarParametrosReporte: {
