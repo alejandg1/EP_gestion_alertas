@@ -6,7 +6,56 @@ const options = {
     info: {
       title: 'API Sala Situacional - Sistema Colaborativo de Alertas',
       version: '1.0.0',
-      description: 'Documentación OpenAPI interactiva para el sistema de alertas de Segura EP. Requiere el SCRIPT_API_TOKEN institucional y JWT de sesión.',
+      description: `
+### Documentacion OpenAPI y Comunicacion en Tiempo Real (WebSockets)
+
+Este backend combina endpoints REST para operaciones transaccionales (autenticacion, subida de fotos, exportacion a SharePoint) y WebSockets (Socket.io) para colaboracion multi-operador en tiempo real.
+
+---
+
+### Protocolo de WebSockets (Socket.io)
+
+* **URL de Conexion:** \`ws://localhost:3090\` (o \`http://localhost:3090\` mediante cliente Socket.io).
+* **Path por defecto:** \`/socket.io/\`
+
+#### Autenticacion en el Handshake
+El WebSocket valida el token institucional y el JWT de sesion del operador:
+\`\`\`javascript
+import { io } from 'socket.io-client';
+
+const socket = io('http://localhost:3090', {
+  auth: {
+    api_token: 'TU_SCRIPT_API_TOKEN', // Token del archivo .env
+    token: 'TOKEN_JWT_DEL_LOGIN'        // Obtenido en POST /api/auth/login
+  }
+});
+\`\`\`
+
+---
+
+### Eventos emitidos por el Cliente (Client -> Server)
+
+| Evento | Payload JSON | Descripcion |
+| :--- | :--- | :--- |
+| **\`unirse_reporte\`** | \`{ "reporteId": "string" }\` | Se une a la sala del reporte y solicita el estado actual con sus locks. |
+| **\`lock_campo\`** | \`{ "reporteId": "string", "campoKey": "string" }\` | Notifica que el operador comenzo a editar un campo general (ej: \`numero_rds\`, \`inocar_pleamar\`). |
+| **\`unlock_campo\`** | \`{ "reporteId": "string", "campoKey": "string" }\` | Libera el candado del campo al terminar la edicion (\`blur\`). |
+| **\`actualizar_parametros\`** | \`{ "reporteId": "string", "parametros": { ... } }\` | Guarda y sincroniza cambios en los campos generales (RDS, INOCAR, horas de corte). |
+| **\`agregar_novedad\`** | \`{ "reporteId": "string", "novedad": { ... } }\` | Envia una novedad redactada localmente. El servidor la guarda en MongoDB y la proyecta a todos. |
+
+---
+
+### Eventos emitidos por el Servidor (Server -> Client Broadcast)
+
+| Evento | Payload Recibido | Accion en Frontend |
+| :--- | :--- | :--- |
+| **\`reporte_cargado\`** | \`{ reporte, locks, usuariosActivos }\` | Carga el reporte, sus novedades, la autoria calculada y los campos bloqueados actualmente. |
+| **\`novedad_agregada\`** | \`{ novedad, colaboradores, elaborado_por }\` | Renderiza la novedad en la lista y actualiza automaticamente el campo Elaborado por. |
+| **\`campo_bloqueado\`** | \`{ campoKey, usuarioId, usuarioNombre }\` | Deshabilita el input y muestra mensaje: En edicion por [Nombre]. |
+| **\`campo_liberado\`** | \`{ campoKey }\` | Reactiva el input y retira el estado de bloqueo. |
+| **\`parametros_actualizados\`** | \`{ reporteId, parametros, actualizadoPor }\` | Actualiza los valores de los parametros generales en pantalla sin recargar. |
+| **\`usuarios_actualizados\`** | \`{ usuariosActivos: [{ usuarioId, nombre, correo }] }\` | Lista de operadores conectados en la sala del reporte. |
+      `,
     },
     servers: [
       {
