@@ -8,16 +8,43 @@ const { sharepointService, COLUMNAS_EXCEL } = require('../services/sharepointSer
 const generarCodigoReporte = async () => {
   const d = new Date();
   const yearMonth = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
-  const count = await Reporte.countDocuments();
-  const correlativo = String(count + 1).padStart(3, '0');
-  return `REP-${yearMonth}-${correlativo}`;
+  const prefix = `REP-${yearMonth}-`;
+
+  const reportesMes = await Reporte.find({ codigo: new RegExp(`^${prefix}`) })
+    .select('codigo')
+    .lean();
+
+  let maxNum = 0;
+  reportesMes.forEach(r => {
+    if (r.codigo) {
+      const match = r.codigo.match(/-(\d+)$/);
+      if (match) {
+        const n = parseInt(match[1], 10);
+        if (n > maxNum) maxNum = n;
+      }
+    }
+  });
+
+  let siguienteNumero = maxNum + 1;
+  let codigoCandidato = `${prefix}${String(siguienteNumero).padStart(3, '0')}`;
+
+  while (await Reporte.exists({ codigo: codigoCandidato })) {
+    siguienteNumero++;
+    codigoCandidato = `${prefix}${String(siguienteNumero).padStart(3, '0')}`;
+  }
+
+  return codigoCandidato;
 };
 
 exports.listarReportes = async (req, res) => {
   try {
-    const { page, limit, busqueda, estado, fechaDesde, fechaHasta } = req.query;
+    const { page, limit, busqueda, fechaDesde, fechaHasta, incluirEliminados } = req.query;
 
     const filtro = {};
+
+    if (incluirEliminados !== 'true') {
+      filtro.eliminado = { $ne: true };
+    }
 
     if (busqueda && busqueda.trim()) {
       filtro.$or = [
@@ -27,22 +54,27 @@ exports.listarReportes = async (req, res) => {
       ];
     }
 
-    if (estado && estado.trim()) {
-      filtro.estado = estado.trim().toUpperCase();
-    }
-
     if (fechaDesde || fechaHasta) {
       filtro.fecha_reporte = {};
       if (fechaDesde) filtro.fecha_reporte.$gte = fechaDesde;
       if (fechaHasta) filtro.fecha_reporte.$lte = fechaHasta;
     }
 
-    const selectFields = 'codigo titulo estado numero_rds fecha_reporte hora_inicio hora_fin revisado_por cabecera periodo inocar_fecha inocar_pleamar inocar_bajamar elaborado_por colaboradores novedades creado_en actualizado_en';
+    const selectFields = 'codigo titulo numero_rds fecha_reporte hora_inicio hora_fin revisado_por cabecera periodo inocar_fecha inocar_pleamar inocar_bajamar elaborado_por colaboradores novedades eliminado eliminado_en creado_en actualizado_en';
 
     if (!page && !limit) {
-      const reportes = await Reporte.find(filtro)
+      let reportes = await Reporte.find(filtro)
         .sort({ actualizado_en: -1 })
         .select(selectFields);
+
+      // Si no se solicitan eliminados, filtrar novedades eliminadas
+      if (incluirEliminados !== 'true') {
+        reportes = reportes.map(r => {
+          const repObj = r.toObject();
+          repObj.novedades = (repObj.novedades || []).filter(n => !n.eliminado);
+          return repObj;
+        });
+      }
 
       return res.json({
         ok: true,
@@ -55,7 +87,7 @@ exports.listarReportes = async (req, res) => {
     const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 15));
     const skip = (pageNum - 1) * limitNum;
 
-    const [reportes, total] = await Promise.all([
+    let [reportes, total] = await Promise.all([
       Reporte.find(filtro)
         .sort({ actualizado_en: -1 })
         .skip(skip)
@@ -63,6 +95,14 @@ exports.listarReportes = async (req, res) => {
         .select(selectFields),
       Reporte.countDocuments(filtro)
     ]);
+
+    if (incluirEliminados !== 'true') {
+      reportes = reportes.map(r => {
+        const repObj = r.toObject();
+        repObj.novedades = (repObj.novedades || []).filter(n => !n.eliminado);
+        return repObj;
+      });
+    }
 
     const totalPages = Math.ceil(total / limitNum) || 1;
 
@@ -228,11 +268,11 @@ exports.actualizarParametros = async (req, res) => {
     const camposPermitidos = [
       'titulo', 'observaciones_generales', 'numero_rds', 'fecha_reporte',
       'hora_inicio', 'hora_fin', 'revisado_por', 'cabecera', 'periodo',
-      'inocar_fecha', 'inocar_pleamar', 'inocar_bajamar', 'estado'
+      'inocar_fecha', 'inocar_pleamar', 'inocar_bajamar'
     ];
 
     const reporte = await Reporte.findById(id);
-    if (!reporte) {
+    if (!reporte || reporte.eliminado) {
       return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
     }
 
@@ -282,13 +322,19 @@ exports.actualizarParametros = async (req, res) => {
 exports.obtenerReporte = async (req, res) => {
   try {
     const { id } = req.params;
+    const { incluirEliminados } = req.query;
     const reporte = await Reporte.findById(id);
 
-    if (!reporte) {
+    if (!reporte || (reporte.eliminado && incluirEliminados !== 'true')) {
       return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
     }
 
-    return res.json({ ok: true, reporte });
+    const reporteRes = reporte.toObject();
+    if (incluirEliminados !== 'true') {
+      reporteRes.novedades = (reporteRes.novedades || []).filter(n => !n.eliminado);
+    }
+
+    return res.json({ ok: true, reporte: reporteRes });
   } catch (error) {
     return res.status(500).json({ ok: false, mensaje: 'Error al obtener reporte', error: error.message });
   }
@@ -304,7 +350,7 @@ exports.eliminarReporte = async (req, res) => {
     }
 
     const reporte = await Reporte.findById(id);
-    if (!reporte) {
+    if (!reporte || reporte.eliminado) {
       return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
     }
 
@@ -312,11 +358,14 @@ exports.eliminarReporte = async (req, res) => {
       codigo: reporte.codigo,
       titulo: reporte.titulo,
       numero_rds: reporte.numero_rds,
-      total_novedades: reporte.novedades?.length || 0,
+      total_novedades: reporte.novedades?.filter(n => !n.eliminado).length || 0,
       total_colaboradores: reporte.colaboradores?.length || 0,
     };
 
-    await Reporte.findByIdAndDelete(id);
+    // Soft delete: marcar eliminado como true y asignar fecha
+    reporte.eliminado = true;
+    reporte.eliminado_en = new Date();
+    await reporte.save();
 
     await Auditoria.create({
       usuario_id: usuario?._id,
@@ -324,12 +373,12 @@ exports.eliminarReporte = async (req, res) => {
       reporte_id: id,
       entidad: 'REPORTE',
       accion: 'ELIMINAR',
-      detalles: detallesAuditoria,
+      detalles: { ...detallesAuditoria, tipo_eliminacion: 'SOFT_DELETE' },
     });
 
     return res.json({
       ok: true,
-      mensaje: 'Reporte eliminado exitosamente',
+      mensaje: 'Reporte eliminado exitosamente (soft delete)',
       id,
       detalles: detallesAuditoria,
     });
@@ -368,7 +417,7 @@ exports.agregarNovedad = async (req, res) => {
     const datosNovedad = req.body;
 
     const reporte = await Reporte.findById(id);
-    if (!reporte) {
+    if (!reporte || reporte.eliminado) {
       return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
     }
 
@@ -460,7 +509,10 @@ exports.agregarNovedad = async (req, res) => {
       detalles: { novedad_direccion: nuevaNovedad.direccion, tipo: nuevaNovedad.tipo_evento, usuario: nuevaNovedad.usuario_nombre, fotos_count: fotosArray.length },
     });
 
-    return res.status(201).json({ ok: true, mensaje: 'Novedad agregada exitosamente', reporte });
+    const reporteRes = reporte.toObject();
+    reporteRes.novedades = (reporteRes.novedades || []).filter(n => !n.eliminado);
+
+    return res.status(201).json({ ok: true, mensaje: 'Novedad agregada exitosamente', reporte: reporteRes });
   } catch (error) {
     return res.status(500).json({ ok: false, mensaje: 'Error al agregar novedad', error: error.message });
   }
@@ -473,12 +525,12 @@ exports.actualizarNovedad = async (req, res) => {
     const datos = req.body || {};
 
     const reporte = await Reporte.findById(id);
-    if (!reporte) {
+    if (!reporte || reporte.eliminado) {
       return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
     }
 
     const novedad = reporte.novedades.id(novedadId);
-    if (!novedad) {
+    if (!novedad || novedad.eliminado) {
       return res.status(404).json({ ok: false, mensaje: 'Novedad no encontrada en el reporte' });
     }
 
@@ -568,17 +620,19 @@ exports.eliminarNovedad = async (req, res) => {
     const usuario = req.usuario;
 
     const reporte = await Reporte.findById(id);
-    if (!reporte) {
+    if (!reporte || reporte.eliminado) {
       return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
     }
 
     const novedad = reporte.novedades.id(novedadId);
-    if (!novedad) {
+    if (!novedad || novedad.eliminado) {
       return res.status(404).json({ ok: false, mensaje: 'Novedad no encontrada en el reporte' });
     }
 
     const direccionEliminada = novedad.direccion;
-    reporte.novedades.pull(novedadId);
+    // Soft delete: marcar como eliminada en vez de hacer pull
+    novedad.eliminado = true;
+    novedad.eliminado_en = new Date();
 
     if (usuario) {
       const colabIndex = reporte.colaboradores.findIndex(
@@ -598,16 +652,18 @@ exports.eliminarNovedad = async (req, res) => {
       reporte_id: reporte._id,
       entidad: 'NOVEDAD',
       accion: 'ELIMINAR',
-      detalles: { novedad_id: novedadId, direccion: direccionEliminada },
+      detalles: { novedad_id: novedadId, direccion: direccionEliminada, tipo_eliminacion: 'SOFT_DELETE' },
     });
+
+    const novedadesActivas = reporte.novedades.filter(n => !n.eliminado);
 
     return res.json({
       ok: true,
-      mensaje: 'Novedad eliminada exitosamente',
+      mensaje: 'Novedad eliminada exitosamente (soft delete)',
       novedad_id: novedadId,
       elaborado_por: reporte.elaborado_por,
       colaboradores: reporte.colaboradores,
-      total_novedades: reporte.novedades.length
+      total_novedades: novedadesActivas.length
     });
   } catch (error) {
     return res.status(500).json({ ok: false, mensaje: 'Error al eliminar novedad', error: error.message });
@@ -620,18 +676,19 @@ exports.exportarAExcel = async (req, res) => {
     const usuario = req.usuario;
 
     const reporte = await Reporte.findById(id);
-    if (!reporte) {
+    if (!reporte || reporte.eliminado) {
       return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
     }
 
-    if (!reporte.novedades || reporte.novedades.length === 0) {
+    const novedadesActivas = (reporte.novedades || []).filter(n => !n.eliminado);
+    if (novedadesActivas.length === 0) {
       return res.status(400).json({ ok: false, mensaje: 'El reporte no tiene novedades para registrar en Excel' });
     }
 
-    const resultado = await sharepointService.registrarReporteEnExcel(reporte);
+    const reporteClon = reporte.toObject();
+    reporteClon.novedades = novedadesActivas;
 
-    reporte.estado = 'EXPORTADO_EXCEL';
-    await reporte.save();
+    const resultado = await sharepointService.registrarReporteEnExcel(reporteClon);
 
     await Auditoria.create({
       usuario_id: usuario._id,
@@ -639,7 +696,7 @@ exports.exportarAExcel = async (req, res) => {
       reporte_id: reporte._id,
       entidad: 'REPORTE',
       accion: 'EDITAR',
-      detalles: { accion: 'EXPORTADO_A_EXCEL_SHAREPOINT', total_filas: reporte.novedades.length }
+      detalles: { accion: 'EXPORTADO_A_EXCEL_SHAREPOINT', total_filas: novedadesActivas.length }
     });
 
     return res.json({

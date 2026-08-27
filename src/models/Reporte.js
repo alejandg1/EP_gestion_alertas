@@ -74,6 +74,15 @@ const novedadSchema = new mongoose.Schema({
     enum: ['ABIERTO', 'EN_ATENCION', 'CERRADO'],
     default: 'ABIERTO',
   },
+  eliminado: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+  eliminado_en: {
+    type: Date,
+    default: null,
+  },
   creado_en: {
     type: Date,
     default: Date.now,
@@ -123,11 +132,6 @@ const reporteSchema = new mongoose.Schema({
     type: String,
     required: [true, 'El título del reporte es obligatorio'],
     trim: true,
-  },
-  estado: {
-    type: String,
-    enum: ['BORRADOR', 'ACTIVO', 'FINALIZADO', 'EXPORTADO_EXCEL'],
-    default: 'ACTIVO',
   },
   numero_rds: {
     type: String,
@@ -186,6 +190,15 @@ const reporteSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
+  eliminado: {
+    type: Boolean,
+    default: false,
+    index: true,
+  },
+  eliminado_en: {
+    type: Date,
+    default: null,
+  },
   creado_en: {
     type: Date,
     default: Date.now,
@@ -198,15 +211,16 @@ const reporteSchema = new mongoose.Schema({
 
 reporteSchema.index({ fecha_reporte: -1, actualizado_en: -1 });
 reporteSchema.index({ numero_rds: 1 });
-reporteSchema.index({ estado: 1, fecha_reporte: -1 });
+reporteSchema.index({ eliminado: 1, fecha_reporte: -1 });
 
 reporteSchema.pre('save', function () {
 
   this.actualizado_en = new Date();
 
-  if (this.novedades && this.novedades.length > 0) {
+  const novedadesActivas = (this.novedades || []).filter(n => !n.eliminado);
+  if (novedadesActivas.length > 0) {
     const autoresNovedades = [...new Set(
-      this.novedades
+      novedadesActivas
         .map(n => n.usuario_nombre)
         .filter(Boolean)
     )];

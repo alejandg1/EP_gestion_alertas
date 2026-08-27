@@ -144,7 +144,6 @@ const socket = io('http://localhost:3090', {
             inocar_pleamar: { type: 'string', example: 'a las 22h42 con 4.13m' },
             inocar_bajamar: { type: 'string', example: 'a las 05h27 del 08/05/2026 con 0.79m' },
             observaciones_generales: { type: 'string', example: 'Observaciones actualizadas.' },
-            estado: { type: 'string', enum: ['BORRADOR', 'ACTIVO', 'FINALIZADO', 'EXPORTADO_EXCEL'], example: 'ACTIVO' },
           },
         },
         AgregarNovedad: {

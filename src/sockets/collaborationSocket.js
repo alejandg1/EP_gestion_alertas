@@ -43,9 +43,16 @@ function initCollaborationSockets(io) {
         }
 
         const reporte = await Reporte.findById(reporteId);
+        if (!reporte || reporte.eliminado) {
+          socket.emit('error_socket', { mensaje: 'Reporte no encontrado o eliminado' });
+          return;
+        }
+
+        const reporteRes = reporte.toObject();
+        reporteRes.novedades = (reporteRes.novedades || []).filter(n => !n.eliminado);
 
         socket.emit('reporte_cargado', {
-          reporte,
+          reporte: reporteRes,
           locks: locksPorReporte.get(reporteId),
           usuariosActivos: Array.from(usuariosEnReporte.get(reporteId).values()),
         });
@@ -98,7 +105,7 @@ function initCollaborationSockets(io) {
     socket.on('agregar_novedad', async ({ reporteId, novedad }) => {
       try {
         const reporte = await Reporte.findById(reporteId);
-        if (!reporte) return;
+        if (!reporte || reporte.eliminado) return;
 
         const nuevaNovedad = {
           usuario_id: usuario.id,
@@ -151,7 +158,7 @@ function initCollaborationSockets(io) {
     socket.on('actualizar_parametros', async ({ reporteId, parametros }) => {
       try {
         const reporte = await Reporte.findById(reporteId);
-        if (!reporte) return;
+        if (!reporte || reporte.eliminado) return;
 
         const campos = [
           'titulo', 'observaciones_generales', 'numero_rds', 'fecha_reporte',
@@ -201,10 +208,10 @@ function initCollaborationSockets(io) {
     socket.on('actualizar_novedad', async ({ reporteId, novedadId, cambios }) => {
       try {
         const reporte = await Reporte.findById(reporteId);
-        if (!reporte) return;
+        if (!reporte || reporte.eliminado) return;
 
         const novedad = reporte.novedades.id(novedadId);
-        if (!novedad) return;
+        if (!novedad || novedad.eliminado) return;
 
         const campos = [
           'tipo_evento', 'direccion', 'aga', 'instituciones', 'fecha_evento',
@@ -254,9 +261,14 @@ function initCollaborationSockets(io) {
     socket.on('eliminar_novedad', async ({ reporteId, novedadId }) => {
       try {
         const reporte = await Reporte.findById(reporteId);
-        if (!reporte) return;
+        if (!reporte || reporte.eliminado) return;
 
-        reporte.novedades.pull(novedadId);
+        const novedad = reporte.novedades.id(novedadId);
+        if (!novedad || novedad.eliminado) return;
+
+        // Soft delete novedad
+        novedad.eliminado = true;
+        novedad.eliminado_en = new Date();
 
         if (usuario && usuario.id) {
           const colabIndex = reporte.colaboradores.findIndex(
@@ -284,7 +296,7 @@ function initCollaborationSockets(io) {
     socket.on('eliminar_reporte', async ({ reporteId }) => {
       try {
         const reporte = await Reporte.findById(reporteId);
-        if (!reporte) {
+        if (!reporte || reporte.eliminado) {
           socket.emit('error_socket', { mensaje: 'Reporte no encontrado' });
           return;
         }
@@ -293,10 +305,14 @@ function initCollaborationSockets(io) {
           codigo: reporte.codigo,
           titulo: reporte.titulo,
           numero_rds: reporte.numero_rds,
-          total_novedades: reporte.novedades?.length || 0,
+          total_novedades: reporte.novedades?.filter(n => !n.eliminado).length || 0,
+          tipo_eliminacion: 'SOFT_DELETE',
         };
 
-        await Reporte.findByIdAndDelete(reporteId);
+        // Soft delete reporte
+        reporte.eliminado = true;
+        reporte.eliminado_en = new Date();
+        await reporte.save();
 
         await Auditoria.create({
           usuario_id: usuario.id,

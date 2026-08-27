@@ -29,12 +29,6 @@ const upload = require('../middlewares/uploadMiddleware');
  *           type: string
  *         description: Búsqueda por número RDS, título o elaborado por
  *       - in: query
- *         name: estado
- *         schema:
- *           type: string
- *           enum: [BORRADOR, ACTIVO, FINALIZADO, EXPORTADO_EXCEL]
- *         description: Filtrar por estado del reporte
- *       - in: query
  *         name: fechaDesde
  *         schema:
  *           type: string
