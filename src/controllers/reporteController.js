@@ -63,7 +63,6 @@ exports.crearReporte = async (req, res) => {
       idsAgregados.add(String(usuarioAuth._id));
     }
 
-    // 2. Procesar usuario_id / colaborador_id enviado en el body
     const targetUserId = usuario_id || colaborador_id;
     if (targetUserId && mongoose.Types.ObjectId.isValid(targetUserId)) {
       const u = await Usuario.findById(targetUserId);
@@ -80,7 +79,6 @@ exports.crearReporte = async (req, res) => {
       }
     }
 
-    // 3. Procesar correo_colaborador / colaborador_correo enviado en el body
     const targetEmail = correo_colaborador || colaborador_correo;
     if (targetEmail) {
       const u = await Usuario.findOne({ correo: String(targetEmail).toLowerCase().trim() });
@@ -97,7 +95,6 @@ exports.crearReporte = async (req, res) => {
       }
     }
 
-    // 4. Procesar array de colaboradores si se envía
     if (Array.isArray(colaboradoresEntrantes)) {
       for (const item of colaboradoresEntrantes) {
         const uid = typeof item === 'string' ? item : item?.usuario_id || item?._id;
@@ -182,7 +179,6 @@ exports.actualizarParametros = async (req, res) => {
       }
     });
 
-    // Registrar o actualizar al usuario modificador como colaborador
     if (usuario) {
       const colabIndex = reporte.colaboradores.findIndex(
         c => String(c.usuario_id) === String(usuario._id)

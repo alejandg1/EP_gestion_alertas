@@ -32,7 +32,6 @@ const sesionSchema = new mongoose.Schema({
   }
 });
 
-// Índice para búsqueda rápida por usuario
 sesionSchema.index({ usuario_id: 1, activo: 1 });
 
 module.exports = mongoose.model('Sesion', sesionSchema);

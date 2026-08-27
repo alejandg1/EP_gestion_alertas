@@ -1,4 +1,4 @@
-﻿const mongoose = require('mongoose');
+const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
 const usuarioSchema = new mongoose.Schema({
@@ -8,7 +8,12 @@ const usuarioSchema = new mongoose.Schema({
     unique: true,
     lowercase: true,
     trim: true,
+    match: [
+      /^[a-zA-Z0-9._%+-]+@(mail\.)?seguraep\.gob\.ec$/,
+      'El correo institucional debe pertenecer al dominio @seguraep.gob.ec o @mail.seguraep.gob.ec'
+    ],
   },
+
   password: {
     type: String,
     required: [true, 'La contraseña es obligatoria'],
@@ -23,7 +28,7 @@ const usuarioSchema = new mongoose.Schema({
   },
   rol: {
     type: String,
-    enum: ['operador', 'supervisor', 'admin'],
+    enum: ['operador', 'admin'],
     default: 'operador',
   },
   requiere_cambio_pw: {
@@ -36,7 +41,6 @@ const usuarioSchema = new mongoose.Schema({
   }
 });
 
-// Hash de contraseña antes de guardar
 usuarioSchema.pre('save', async function () {
   if (!this.isModified('password')) return;
   const salt = await bcrypt.genSalt(10);

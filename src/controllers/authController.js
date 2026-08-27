@@ -25,7 +25,18 @@ exports.registrar = async (req, res) => {
       return res.status(400).json({ ok: false, mensaje: 'Correo y contraseña son obligatorios' });
     }
 
-    const usuarioExiste = await Usuario.findOne({ correo: correo.toLowerCase().trim() });
+    const correoNormalizado = correo.toLowerCase().trim();
+    const esDominioValido = correoNormalizado.endsWith('@seguraep.gob.ec') || correoNormalizado.endsWith('@mail.seguraep.gob.ec');
+    if (!esDominioValido) {
+      logger.warn(`Registro rechazado: dominio de correo no permitido`, { correo: correoNormalizado });
+      return res.status(400).json({
+        ok: false,
+        mensaje: 'El correo debe pertenecer al dominio institucional (@seguraep.gob.ec o @mail.seguraep.gob.ec)'
+      });
+    }
+
+    const usuarioExiste = await Usuario.findOne({ correo: correoNormalizado });
+
     if (usuarioExiste) {
       logger.warn(`Registro rechazado: el correo ya se encuentra registrado`, { correo });
       return res.status(400).json({ ok: false, mensaje: 'El correo ya está registrado' });
@@ -156,3 +167,86 @@ exports.perfil = async (req, res) => {
     usuario: req.usuario,
   });
 };
+
+exports.chpass = async (req, res) => {
+  try {
+    const { currentPassword, newPassword, usuarioId } = req.body || {};
+    const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
+    const solicitante = req.usuario;
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({
+        ok: false,
+        mensaje: 'La nueva contraseña es obligatoria y debe tener al menos 6 caracteres'
+      });
+    }
+
+    const esAdmin = solicitante && solicitante.rol === 'admin';
+    const targetUserId = (esAdmin && usuarioId) ? usuarioId : solicitante?._id;
+
+    if (!targetUserId) {
+      return res.status(400).json({ ok: false, mensaje: 'ID de usuario no especificado' });
+    }
+
+    const usuarioTarget = await Usuario.findById(targetUserId);
+    if (!usuarioTarget) {
+      logger.warn(`Intento de cambio de contraseña a usuario inexistente: ${targetUserId}`);
+      return res.status(404).json({ ok: false, mensaje: 'Usuario no encontrado' });
+    }
+
+    const esPropiaCuenta = solicitante && solicitante._id.toString() === usuarioTarget._id.toString();
+    if (!esAdmin || esPropiaCuenta) {
+      if (!currentPassword) {
+        return res.status(400).json({
+          ok: false,
+          mensaje: 'Debe ingresar la contraseña actual para cambiarla'
+        });
+      }
+
+      const passwordValido = await usuarioTarget.compararPassword(currentPassword);
+      if (!passwordValido) {
+        logger.warn(`Cambio de contraseña fallido: contraseña actual incorrecta para ${usuarioTarget.correo}`);
+        return res.status(401).json({ ok: false, mensaje: 'La contraseña actual es incorrecta' });
+      }
+
+      if (currentPassword === newPassword) {
+        return res.status(400).json({
+          ok: false,
+          mensaje: 'La nueva contraseña no puede ser idéntica a la actual'
+        });
+      }
+    }
+
+    usuarioTarget.password = newPassword;
+    usuarioTarget.requiere_cambio_pw = false;
+    await usuarioTarget.save();
+
+    // Invalidar sesiones activas del usuario para forzar re-login con la nueva clave
+    await Sesion.updateMany({ usuario_id: usuarioTarget._id, activo: true }, { activo: false });
+
+    await Auditoria.create({
+      usuario_id: solicitante?._id,
+      usuario_correo: solicitante?.correo,
+      entidad: 'USUARIO',
+      accion: 'CAMBIO_PASSWORD',
+      detalles: {
+        usuario_afectado: usuarioTarget.correo,
+        usuario_afectado_id: usuarioTarget._id,
+        cambiado_por_admin: esAdmin && !esPropiaCuenta,
+        ip
+      },
+      ip
+    });
+
+    logger.info(`Contraseña actualizada exitosamente para: ${usuarioTarget.correo} por ${solicitante?.correo || 'admin'}`);
+
+    return res.json({
+      ok: true,
+      mensaje: `Contraseña actualizada exitosamente para ${usuarioTarget.correo}`
+    });
+  } catch (error) {
+    logger.error(`Error al cambiar contraseña: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ ok: false, mensaje: 'Error al cambiar contraseña', error: error.message });
+  }
+};
+

@@ -40,4 +40,27 @@ const protegerRuta = async (req, res, next) => {
   }
 };
 
-module.exports = { protegerRuta };
+const requerirAdmin = (req, res, next) => {
+  if (!req.usuario || req.usuario.rol !== 'admin') {
+    return res.status(403).json({
+      ok: false,
+      mensaje: 'Acceso denegado: se requiere rol de administrador para realizar esta acción'
+    });
+  }
+  next();
+};
+
+
+const requerirRol = (...rolesPermitidos) => {
+  return (req, res, next) => {
+    if (!req.usuario || !rolesPermitidos.includes(req.usuario.rol)) {
+      return res.status(403).json({
+        ok: false,
+        mensaje: `Acceso denegado: rol insuficiente. Requiere: ${rolesPermitidos.join(', ')}`
+      });
+    }
+    next();
+  };
+};
+
+module.exports = { protegerRuta, requerirAdmin, requerirRol };

@@ -1,4 +1,4 @@
-﻿const mongoose = require('mongoose');
+const mongoose = require('mongoose');
 
 const auditoriaSchema = new mongoose.Schema({
   usuario_id: {
@@ -22,9 +22,10 @@ const auditoriaSchema = new mongoose.Schema({
   },
   accion: {
     type: String,
-    enum: ['LOGIN', 'REGISTRO', 'LOGOUT', 'CREAR', 'EDITAR', 'ELIMINAR', 'LOCK_CAMPO', 'UNLOCK_CAMPO'],
+    enum: ['LOGIN', 'REGISTRO', 'LOGOUT', 'CREAR', 'EDITAR', 'ELIMINAR', 'LOCK_CAMPO', 'UNLOCK_CAMPO', 'CAMBIO_PASSWORD'],
     required: true,
   },
+
   detalles: {
     type: mongoose.Schema.Types.Mixed,
     default: {},

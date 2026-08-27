@@ -1,14 +1,16 @@
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
-const { protegerRuta } = require('../middlewares/authMiddleware');
+const { protegerRuta, requerirAdmin } = require('../middlewares/authMiddleware');
 
 /**
  * @openapi
  * /auth/registro:
  *   post:
- *     summary: Registrar un nuevo usuario/operador
+ *     summary: Registrar un nuevo usuario/operador (Solo Administradores)
  *     tags: [Autenticacion]
+ *     security:
+ *       - BearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -20,8 +22,13 @@ const { protegerRuta } = require('../middlewares/authMiddleware');
  *         description: Usuario registrado exitosamente
  *       400:
  *         description: Datos inválidos o correo ya registrado
+ *       401:
+ *         description: No autenticado
+ *       403:
+ *         description: No autorizado (requiere rol admin)
  */
-router.post('/registro', authController.registrar);
+router.post('/registro', protegerRuta, requerirAdmin, authController.registrar);
+
 
 /**
  * @openapi
@@ -71,4 +78,41 @@ router.post('/logout', protegerRuta, authController.logout);
  */
 router.get('/perfil', protegerRuta, authController.perfil);
 
+/**
+ * @openapi
+ * /auth/chpass:
+ *   post:
+ *     summary: Cambiar contraseña (propia o de otro usuario si es Admin)
+ *     tags: [Autenticacion]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - newPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *                 description: Obligatorio solo si el usuario cambia su propia contraseña
+ *               newPassword:
+ *                 type: string
+ *                 description: Nueva contraseña
+ *               usuarioId:
+ *                 type: string
+ *                 description: ID del usuario a modificar (solo administradores)
+ *     responses:
+ *       200:
+ *         description: Contraseña cambiada exitosamente
+ *       400:
+ *         description: Datos inválidos
+ *       401:
+ *         description: Contraseña actual incorrecta o token inválido
+ */
+router.post('/chpass', protegerRuta, authController.chpass);
+
 module.exports = router;
+
