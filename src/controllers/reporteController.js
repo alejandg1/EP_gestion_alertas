@@ -362,6 +362,154 @@ exports.agregarNovedad = async (req, res) => {
   }
 };
 
+exports.actualizarNovedad = async (req, res) => {
+  try {
+    const { id, novedadId } = req.params;
+    const usuario = req.usuario;
+    const datos = req.body || {};
+
+    const reporte = await Reporte.findById(id);
+    if (!reporte) {
+      return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
+    }
+
+    const novedad = reporte.novedades.id(novedadId);
+    if (!novedad) {
+      return res.status(404).json({ ok: false, mensaje: 'Novedad no encontrada en el reporte' });
+    }
+
+    const camposPermitidos = [
+      'tipo_evento', 'direccion', 'aga', 'instituciones', 'fecha_evento',
+      'hora_evento', 'latitud', 'longitud', 'recurso_asignado', 'estado_operativo',
+      'descripcion', 'acciones_inmediatas', 'ficha', 'camara_cvvc',
+      'desaparecidos', 'fallecidos', 'via_afectada', 'propiedad_publica',
+      'propiedad_privada', 'bcbg', 'atm', 'ia', 'parques_ep', 'ooppmm',
+      'cnel', 'urvaseo', 'ggrr', 'total_recursos', 'num_bcbg', 'num_atm',
+      'num_ia', 'num_parques_ep', 'num_ooppmm', 'num_cnel', 'num_urvaseo',
+      'num_ggrr', 'total_personal', 'recursos', 'hora_en_sitio',
+      'tiempo_respuesta', 'solucionado', 'estado_novedad'
+    ];
+
+    camposPermitidos.forEach(campo => {
+      if (datos[campo] !== undefined) {
+        if (['latitud', 'longitud', 'desaparecidos', 'fallecidos', 'total_recursos', 'num_bcbg', 'num_atm', 'num_ia', 'num_parques_ep', 'num_ooppmm', 'num_cnel', 'num_urvaseo', 'num_ggrr', 'total_personal'].includes(campo)) {
+          novedad[campo] = Number(datos[campo]);
+        } else {
+          novedad[campo] = datos[campo];
+        }
+      }
+    });
+
+    if (req.files && req.files.length > 0) {
+      const nuevasFotos = req.files.map(f => `/uploads/fotos/${f.filename}`);
+      novedad.fotos = novedad.fotos ? novedad.fotos.concat(nuevasFotos) : nuevasFotos;
+    } else if (datos.fotos !== undefined) {
+      if (Array.isArray(datos.fotos)) {
+        novedad.fotos = datos.fotos;
+      } else if (typeof datos.fotos === 'string' && datos.fotos.trim()) {
+        try {
+          novedad.fotos = JSON.parse(datos.fotos);
+        } catch {
+          novedad.fotos = [datos.fotos];
+        }
+      }
+    }
+
+    if (usuario) {
+      const colabIndex = reporte.colaboradores.findIndex(
+        c => String(c.usuario_id) === String(usuario._id)
+      );
+
+      if (colabIndex >= 0) {
+        reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
+        reporte.colaboradores[colabIndex].total_ediciones = (reporte.colaboradores[colabIndex].total_ediciones || 1) + 1;
+      } else {
+        reporte.colaboradores.push({
+          usuario_id: usuario._id,
+          nombre: usuario.nombre || usuario.correo,
+          correo: usuario.correo,
+          primer_aporte: new Date(),
+          ultimo_aporte: new Date(),
+          total_ediciones: 1,
+        });
+      }
+    }
+
+    await reporte.save();
+
+    await Auditoria.create({
+      usuario_id: usuario._id,
+      usuario_correo: usuario.correo,
+      reporte_id: reporte._id,
+      entidad: 'NOVEDAD',
+      accion: 'EDITAR',
+      detalles: { novedad_id: novedad._id, direccion: novedad.direccion, camposModificados: Object.keys(datos) },
+    });
+
+    return res.json({
+      ok: true,
+      mensaje: 'Novedad actualizada exitosamente',
+      novedad,
+      elaborado_por: reporte.elaborado_por,
+      colaboradores: reporte.colaboradores
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, mensaje: 'Error al actualizar novedad', error: error.message });
+  }
+};
+
+exports.eliminarNovedad = async (req, res) => {
+  try {
+    const { id, novedadId } = req.params;
+    const usuario = req.usuario;
+
+    const reporte = await Reporte.findById(id);
+    if (!reporte) {
+      return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
+    }
+
+    const novedad = reporte.novedades.id(novedadId);
+    if (!novedad) {
+      return res.status(404).json({ ok: false, mensaje: 'Novedad no encontrada en el reporte' });
+    }
+
+    const direccionEliminada = novedad.direccion;
+    reporte.novedades.pull(novedadId);
+
+    if (usuario) {
+      const colabIndex = reporte.colaboradores.findIndex(
+        c => String(c.usuario_id) === String(usuario._id)
+      );
+      if (colabIndex >= 0) {
+        reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
+        reporte.colaboradores[colabIndex].total_ediciones = (reporte.colaboradores[colabIndex].total_ediciones || 1) + 1;
+      }
+    }
+
+    await reporte.save();
+
+    await Auditoria.create({
+      usuario_id: usuario._id,
+      usuario_correo: usuario.correo,
+      reporte_id: reporte._id,
+      entidad: 'NOVEDAD',
+      accion: 'ELIMINAR',
+      detalles: { novedad_id: novedadId, direccion: direccionEliminada },
+    });
+
+    return res.json({
+      ok: true,
+      mensaje: 'Novedad eliminada exitosamente',
+      novedad_id: novedadId,
+      elaborado_por: reporte.elaborado_por,
+      colaboradores: reporte.colaboradores,
+      total_novedades: reporte.novedades.length
+    });
+  } catch (error) {
+    return res.status(500).json({ ok: false, mensaje: 'Error al eliminar novedad', error: error.message });
+  }
+};
+
 exports.exportarAExcel = async (req, res) => {
   try {
     const { id } = req.params;

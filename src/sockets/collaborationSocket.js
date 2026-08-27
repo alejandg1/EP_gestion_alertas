@@ -198,6 +198,89 @@ function initCollaborationSockets(io) {
       }
     });
 
+    socket.on('actualizar_novedad', async ({ reporteId, novedadId, cambios }) => {
+      try {
+        const reporte = await Reporte.findById(reporteId);
+        if (!reporte) return;
+
+        const novedad = reporte.novedades.id(novedadId);
+        if (!novedad) return;
+
+        const campos = [
+          'tipo_evento', 'direccion', 'aga', 'instituciones', 'fecha_evento',
+          'hora_evento', 'latitud', 'longitud', 'recurso_asignado', 'estado_operativo',
+          'descripcion', 'acciones_inmediatas', 'fotos', 'estado_novedad', 'solucionado'
+        ];
+
+        campos.forEach((campo) => {
+          if (cambios && cambios[campo] !== undefined) {
+            novedad[campo] = cambios[campo];
+          }
+        });
+
+        // Registrar o actualizar al usuario modificador como colaborador
+        if (usuario && usuario.id) {
+          const colabIndex = reporte.colaboradores.findIndex(
+            c => c.usuario_id.toString() === usuario.id.toString()
+          );
+          if (colabIndex >= 0) {
+            reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
+            reporte.colaboradores[colabIndex].total_ediciones += 1;
+          } else {
+            reporte.colaboradores.push({
+              usuario_id: usuario.id,
+              nombre: usuario.nombre || usuario.correo,
+              correo: usuario.correo,
+              primer_aporte: new Date(),
+              ultimo_aporte: new Date(),
+              total_ediciones: 1,
+            });
+          }
+        }
+
+        await reporte.save();
+
+        io.to(`reporte_${reporteId}`).emit('novedad_actualizada', {
+          novedad,
+          colaboradores: reporte.colaboradores,
+          elaborado_por: reporte.elaborado_por,
+          actualizadoPor: usuario.nombre || usuario.correo,
+        });
+      } catch (err) {
+        socket.emit('error_socket', { mensaje: 'Error al actualizar novedad', error: err.message });
+      }
+    });
+
+    socket.on('eliminar_novedad', async ({ reporteId, novedadId }) => {
+      try {
+        const reporte = await Reporte.findById(reporteId);
+        if (!reporte) return;
+
+        reporte.novedades.pull(novedadId);
+
+        if (usuario && usuario.id) {
+          const colabIndex = reporte.colaboradores.findIndex(
+            c => c.usuario_id.toString() === usuario.id.toString()
+          );
+          if (colabIndex >= 0) {
+            reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
+            reporte.colaboradores[colabIndex].total_ediciones += 1;
+          }
+        }
+
+        await reporte.save();
+
+        io.to(`reporte_${reporteId}`).emit('novedad_eliminada', {
+          novedadId,
+          colaboradores: reporte.colaboradores,
+          elaborado_por: reporte.elaborado_por,
+          eliminadoPor: usuario.nombre || usuario.correo,
+        });
+      } catch (err) {
+        socket.emit('error_socket', { mensaje: 'Error al eliminar novedad', error: err.message });
+      }
+    });
+
     socket.on('disconnect', () => {
       const reporteId = socket.reporteActual;
       if (reporteId) {

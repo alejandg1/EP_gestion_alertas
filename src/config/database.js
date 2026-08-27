@@ -1,4 +1,5 @@
-﻿const mongoose = require('mongoose');
+const mongoose = require('mongoose');
+const logger = require('./logger');
 
 const connectDB = async () => {
   try {
@@ -9,11 +10,12 @@ const connectDB = async () => {
       dbName: dbName,
     });
     
-    console.log(`[INFO] MongoDB conectado exitosamente a la BD: ${dbName}`);
+    logger.info(`MongoDB conectado exitosamente a la BD: ${dbName}`);
   } catch (error) {
-    console.error('[ERROR] Error conectando a MongoDB:', error.message);
+    logger.error(`Error conectando a MongoDB: ${error.message}`, { stack: error.stack });
     process.exit(1);
   }
 };
 
 module.exports = connectDB;
+

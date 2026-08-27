@@ -1,11 +1,13 @@
-require('dotenv').config({ path: './env' });
+require('dotenv').config();
 const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const morgan = require('morgan');
 const swaggerUi = require('swagger-ui-express');
 
+const logger = require('./src/config/logger');
 const connectDB = require('./src/config/database');
 const swaggerSpec = require('./src/config/swagger');
 const authRoutes = require('./src/routes/authRoutes');
@@ -27,6 +29,13 @@ connectDB();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// HTTP Request Logger with Morgan + Winston
+const morganStream = {
+  write: (message) => logger.info(message.trim(), { context: 'HTTP' }),
+};
+app.use(morgan(':remote-addr - :method :url :status :res[content-length] - :response-time ms', { stream: morganStream }));
+
 
 // static files
 app.use(express.static(path.join(__dirname, 'public')));
@@ -64,7 +73,8 @@ initCollaborationSockets(io);
 const PORT = process.env.PORT || 3090;
 const HOST = process.env.HOST || '0.0.0.0';
 server.listen(PORT, HOST, () => {
-  console.log(`[INFO] Servidor ejecutandose en http://${HOST}:${PORT}`);
-  console.log(`[INFO] Documentacion OpenAPI Swagger UI: http://localhost:${PORT}/docs`);
-  console.log(`[INFO] Especificacion OpenAPI JSON (Postman/Insomnia): http://localhost:${PORT}/docs.json`);
+  logger.info(`Servidor ejecutandose en http://${HOST}:${PORT}`);
+  logger.info(`Documentacion OpenAPI Swagger UI: http://localhost:${PORT}/docs`);
+  logger.info(`Especificacion OpenAPI JSON (Postman/Insomnia): http://localhost:${PORT}/docs.json`);
 });
+

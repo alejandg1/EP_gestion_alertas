@@ -163,6 +163,86 @@ router.post('/:id/novedades', protegerRuta, upload.array('fotos', 2), reporteCon
 
 /**
  * @openapi
+ * /reportes/{id}/novedades/{novedadId}:
+ *   put:
+ *     summary: Actualizar una novedad existente del reporte
+ *     tags: [Reportes]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID del reporte
+ *       - in: path
+ *         name: novedadId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID de la novedad a actualizar
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ActualizarNovedad'
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               tipo_evento: { type: string }
+ *               direccion: { type: string }
+ *               aga: { type: string }
+ *               instituciones: { type: string }
+ *               fecha_evento: { type: string }
+ *               hora_evento: { type: string }
+ *               latitud: { type: number }
+ *               longitud: { type: number }
+ *               recurso_asignado: { type: string }
+ *               estado_operativo: { type: string }
+ *               descripcion: { type: string }
+ *               acciones_inmediatas: { type: string }
+ *               fotos:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *     responses:
+ *       200:
+ *         description: Novedad actualizada exitosamente
+ *       404:
+ *         description: Reporte o novedad no encontrada
+ *   delete:
+ *     summary: Eliminar una novedad del reporte
+ *     tags: [Reportes]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID del reporte
+ *       - in: path
+ *         name: novedadId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID de la novedad a eliminar
+ *     responses:
+ *       200:
+ *         description: Novedad eliminada exitosamente
+ *       404:
+ *         description: Reporte o novedad no encontrada
+ */
+router.put('/:id/novedades/:novedadId', protegerRuta, upload.array('fotos', 2), reporteController.actualizarNovedad);
+router.delete('/:id/novedades/:novedadId', protegerRuta, reporteController.eliminarNovedad);
+
+/**
+ * @openapi
  * /reportes/{id}/exportar-excel:
  *   post:
  *     summary: Registrar y sincronizar novedades del reporte en el Excel de SharePoint (42 columnas)

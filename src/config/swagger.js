@@ -41,6 +41,8 @@ const socket = io('http://localhost:3090', {
 | **\`unlock_campo\`** | \`{ "reporteId": "string", "campoKey": "string" }\` | Libera el candado del campo al terminar la edicion (\`blur\`). |
 | **\`actualizar_parametros\`** | \`{ "reporteId": "string", "parametros": { ... } }\` | Guarda y sincroniza cambios en los campos generales (RDS, INOCAR, horas de corte). |
 | **\`agregar_novedad\`** | \`{ "reporteId": "string", "novedad": { ... } }\` | Envia una novedad redactada localmente. El servidor la guarda en MongoDB y la proyecta a todos. |
+| **\`actualizar_novedad\`** | \`{ "reporteId": "string", "novedadId": "string", "cambios": { ... } }\` | Modifica en tiempo real los datos de una novedad existente (tipo, dirección, recurso, fotos, etc.). |
+| **\`eliminar_novedad\`** | \`{ "reporteId": "string", "novedadId": "string" }\` | Elimina una novedad del reporte y sincroniza a todos los operadores conectados. |
 
 ---
 
@@ -50,9 +52,11 @@ const socket = io('http://localhost:3090', {
 | :--- | :--- | :--- |
 | **\`reporte_cargado\`** | \`{ reporte, locks, usuariosActivos }\` | Carga el reporte, sus novedades, la autoria calculada y los campos bloqueados actualmente. |
 | **\`novedad_agregada\`** | \`{ novedad, colaboradores, elaborado_por }\` | Renderiza la novedad en la lista y actualiza automaticamente el campo Elaborado por. |
+| **\`novedad_actualizada\`** | \`{ novedad, colaboradores, elaborado_por, actualizadoPor }\` | Actualiza la tarjeta de la novedad en pantalla sin recargar la lista. |
+| **\`novedad_eliminada\`** | \`{ novedadId, colaboradores, elaborado_por, eliminadoPor }\` | Remueve la novedad de la interfaz y actualiza el conteo y la autoría. |
 | **\`campo_bloqueado\`** | \`{ campoKey, usuarioId, usuarioNombre }\` | Deshabilita el input y muestra mensaje: En edicion por [Nombre]. |
 | **\`campo_liberado\`** | \`{ campoKey }\` | Reactiva el input y retira el estado de bloqueo. |
-| **\`parametros_actualizados\`** | \`{ reporteId, parametros, actualizadoPor }\` | Actualiza los valores de los parametros generales en pantalla sin recargar. |
+| **\`parametros_actualizados\`** | \`{ reporteId, parametros, colaboradores, actualizadoPor }\` | Actualiza los valores de los parametros generales en pantalla sin recargar. |
 | **\`usuarios_actualizados\`** | \`{ usuariosActivos: [{ usuarioId, nombre, correo }] }\` | Lista de operadores conectados en la sala del reporte. |
       `,
     },
@@ -168,13 +172,35 @@ const socket = io('http://localhost:3090', {
             },
           },
         },
+        ActualizarNovedad: {
+          type: 'object',
+          properties: {
+            tipo_evento: { 
+              type: 'string', 
+              enum: ['AGUA', 'ARBOL', 'DESLIZAMIENTO', 'POSTE', 'SINIESTRO', 'INUNDACION', 'VENDAVAL', 'AFECTACION', 'OTRO'],
+              example: 'AGUA'
+            },
+            direccion: { type: 'string', example: 'PROSPERINA 6TO CALLEJON Y AV 41 DIAGONAL A LAS ROSAS' },
+            aga: { type: 'string', example: 'A09' },
+            instituciones: { type: 'string', example: '@emapagye @interagua' },
+            fecha_evento: { type: 'string', example: '2026-08-25' },
+            hora_evento: { type: 'string', example: '16:40' },
+            latitud: { type: 'number', example: -2.1894 },
+            longitud: { type: 'number', example: -79.8891 },
+            recurso_asignado: { type: 'string', example: 'INS-ALC 🚙' },
+            estado_operativo: { type: 'string', example: '✅ATENDIDO' },
+            descripcion: { type: 'string', example: 'Novedad atendida y vía habilitada.' },
+            acciones_inmediatas: { type: 'string', example: 'Se realizó limpieza de sumideros.' },
+            solucionado: { type: 'string', example: 'SI' },
+            fotos: {
+              type: 'array',
+              items: { type: 'string' },
+              example: ['/uploads/fotos/foto-1724678123-123456789.jpg']
+            },
+          },
+        },
       },
     },
-    security: [
-      {
-        ApiKeyAuth: [],
-      },
-    ],
   },
   apis: ['./src/routes/*.js'],
 };
