@@ -114,8 +114,28 @@ router.post('/upload-foto', protegerRuta, upload.array('fotos', 2), reporteContr
  *         description: Reporte encontrado
  *       404:
  *         description: Reporte no encontrado
+ *   delete:
+ *     summary: Eliminar un reporte completo por ID
+ *     tags: [Reportes]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID de MongoDB del reporte a eliminar
+ *     responses:
+ *       200:
+ *         description: Reporte eliminado exitosamente
+ *       400:
+ *         description: ID de reporte inválido
+ *       404:
+ *         description: Reporte no encontrado
  */
 router.get('/:id', protegerRuta, reporteController.obtenerReporte);
+router.delete('/:id', protegerRuta, reporteController.eliminarReporte);
 
 /**
  * @openapi

@@ -281,6 +281,46 @@ function initCollaborationSockets(io) {
       }
     });
 
+    socket.on('eliminar_reporte', async ({ reporteId }) => {
+      try {
+        const reporte = await Reporte.findById(reporteId);
+        if (!reporte) {
+          socket.emit('error_socket', { mensaje: 'Reporte no encontrado' });
+          return;
+        }
+
+        const detalles = {
+          codigo: reporte.codigo,
+          titulo: reporte.titulo,
+          numero_rds: reporte.numero_rds,
+          total_novedades: reporte.novedades?.length || 0,
+        };
+
+        await Reporte.findByIdAndDelete(reporteId);
+
+        await Auditoria.create({
+          usuario_id: usuario.id,
+          usuario_correo: usuario.correo,
+          reporte_id: reporteId,
+          entidad: 'REPORTE',
+          accion: 'ELIMINAR',
+          detalles,
+        });
+
+        io.to(`reporte_${reporteId}`).emit('reporte_eliminado', {
+          reporteId,
+          detalles,
+          eliminadoPor: usuario.nombre || usuario.correo,
+        });
+
+        // Limpiar locks y usuarios del reporte en memoria
+        locksPorReporte.delete(reporteId);
+        usuariosEnReporte.delete(reporteId);
+      } catch (err) {
+        socket.emit('error_socket', { mensaje: 'Error al eliminar reporte', error: err.message });
+      }
+    });
+
     socket.on('disconnect', () => {
       const reporteId = socket.reporteActual;
       if (reporteId) {

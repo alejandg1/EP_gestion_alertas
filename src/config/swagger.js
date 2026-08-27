@@ -43,6 +43,7 @@ const socket = io('http://localhost:3090', {
 | **\`agregar_novedad\`** | \`{ "reporteId": "string", "novedad": { ... } }\` | Envia una novedad redactada localmente. El servidor la guarda en MongoDB y la proyecta a todos. |
 | **\`actualizar_novedad\`** | \`{ "reporteId": "string", "novedadId": "string", "cambios": { ... } }\` | Modifica en tiempo real los datos de una novedad existente (tipo, dirección, recurso, fotos, etc.). |
 | **\`eliminar_novedad\`** | \`{ "reporteId": "string", "novedadId": "string" }\` | Elimina una novedad del reporte y sincroniza a todos los operadores conectados. |
+| **\`eliminar_reporte\`** | \`{ "reporteId": "string" }\` | Elimina un reporte completo y notifica a los operadores conectados. |
 
 ---
 
@@ -51,6 +52,7 @@ const socket = io('http://localhost:3090', {
 | Evento | Payload Recibido | Accion en Frontend |
 | :--- | :--- | :--- |
 | **\`reporte_cargado\`** | \`{ reporte, locks, usuariosActivos }\` | Carga el reporte, sus novedades, la autoria calculada y los campos bloqueados actualmente. |
+| **\`reporte_eliminado\`** | \`{ reporteId, detalles, eliminadoPor }\` | Notifica la eliminación del reporte y remueve la vista activa. |
 | **\`novedad_agregada\`** | \`{ novedad, colaboradores, elaborado_por }\` | Renderiza la novedad en la lista y actualiza automaticamente el campo Elaborado por. |
 | **\`novedad_actualizada\`** | \`{ novedad, colaboradores, elaborado_por, actualizadoPor }\` | Actualiza la tarjeta de la novedad en pantalla sin recargar la lista. |
 | **\`novedad_eliminada\`** | \`{ novedadId, colaboradores, elaborado_por, eliminadoPor }\` | Remueve la novedad de la interfaz y actualiza el conteo y la autoría. |

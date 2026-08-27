@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Reporte = require('../models/Reporte');
 const Usuario = require('../models/Usuario');
 const Auditoria = require('../models/Auditoria');
+const logger = require('../config/logger');
 const { sharepointService, COLUMNAS_EXCEL } = require('../services/sharepointService');
 
 const generarCodigoReporte = async () => {
@@ -290,6 +291,51 @@ exports.obtenerReporte = async (req, res) => {
     return res.json({ ok: true, reporte });
   } catch (error) {
     return res.status(500).json({ ok: false, mensaje: 'Error al obtener reporte', error: error.message });
+  }
+};
+
+exports.eliminarReporte = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const usuario = req.usuario;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ ok: false, mensaje: 'ID de reporte inválido' });
+    }
+
+    const reporte = await Reporte.findById(id);
+    if (!reporte) {
+      return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
+    }
+
+    const detallesAuditoria = {
+      codigo: reporte.codigo,
+      titulo: reporte.titulo,
+      numero_rds: reporte.numero_rds,
+      total_novedades: reporte.novedades?.length || 0,
+      total_colaboradores: reporte.colaboradores?.length || 0,
+    };
+
+    await Reporte.findByIdAndDelete(id);
+
+    await Auditoria.create({
+      usuario_id: usuario?._id,
+      usuario_correo: usuario?.correo || 'sistema',
+      reporte_id: id,
+      entidad: 'REPORTE',
+      accion: 'ELIMINAR',
+      detalles: detallesAuditoria,
+    });
+
+    return res.json({
+      ok: true,
+      mensaje: 'Reporte eliminado exitosamente',
+      id,
+      detalles: detallesAuditoria,
+    });
+  } catch (error) {
+    logger.error(`Error al eliminar reporte: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ ok: false, mensaje: 'Error al eliminar reporte', error: error.message });
   }
 };
 
