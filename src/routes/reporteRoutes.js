@@ -8,13 +8,46 @@ const upload = require('../middlewares/uploadMiddleware');
  * @openapi
  * /reportes:
  *   get:
- *     summary: Listar todos los reportes con colaboradores (N:N) y novedades (1:N)
+ *     summary: Listar reportes (Paginación opcional, filtros de búsqueda y fechas)
  *     tags: [Reportes]
  *     security:
  *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *         description: Número de página (opcional, ej. 1)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         description: Cantidad de registros por página (opcional, ej. 15)
+ *       - in: query
+ *         name: busqueda
+ *         schema:
+ *           type: string
+ *         description: Búsqueda por número RDS, título o elaborado por
+ *       - in: query
+ *         name: estado
+ *         schema:
+ *           type: string
+ *           enum: [BORRADOR, ACTIVO, FINALIZADO, EXPORTADO_EXCEL]
+ *         description: Filtrar por estado del reporte
+ *       - in: query
+ *         name: fechaDesde
+ *         schema:
+ *           type: string
+ *         description: Fecha inicio (YYYY-MM-DD)
+ *       - in: query
+ *         name: fechaHasta
+ *         schema:
+ *           type: string
+ *         description: Fecha fin (YYYY-MM-DD)
  *     responses:
  *       200:
- *         description: Lista de reportes
+ *         description: Lista o página de reportes
+
  *   post:
  *     summary: Crear un nuevo reporte
  *     tags: [Reportes]

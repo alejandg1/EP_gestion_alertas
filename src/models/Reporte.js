@@ -196,8 +196,12 @@ const reporteSchema = new mongoose.Schema({
   }
 });
 
-// Hook pre save para computar elaborado_por y actualizar colaboradores desde las novedades
+reporteSchema.index({ fecha_reporte: -1, actualizado_en: -1 });
+reporteSchema.index({ numero_rds: 1 });
+reporteSchema.index({ estado: 1, fecha_reporte: -1 });
+
 reporteSchema.pre('save', function () {
+
   this.actualizado_en = new Date();
 
   if (this.novedades && this.novedades.length > 0) {

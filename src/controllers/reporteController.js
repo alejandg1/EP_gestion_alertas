@@ -14,15 +14,77 @@ const generarCodigoReporte = async () => {
 
 exports.listarReportes = async (req, res) => {
   try {
-    const reportes = await Reporte.find()
-      .sort({ actualizado_en: -1 })
-      .select('codigo titulo estado numero_rds fecha_reporte hora_inicio hora_fin revisado_por cabecera periodo inocar_fecha inocar_pleamar inocar_bajamar elaborado_por colaboradores novedades creado_en actualizado_en');
+    const { page, limit, busqueda, estado, fechaDesde, fechaHasta } = req.query;
 
-    return res.json({ ok: true, total: reportes.length, reportes });
+    const filtro = {};
+
+    if (busqueda && busqueda.trim()) {
+      filtro.$or = [
+        { numero_rds: { $regex: busqueda.trim(), $options: 'i' } },
+        { titulo: { $regex: busqueda.trim(), $options: 'i' } },
+        { elaborado_por: { $regex: busqueda.trim(), $options: 'i' } }
+      ];
+    }
+
+    if (estado && estado.trim()) {
+      filtro.estado = estado.trim().toUpperCase();
+    }
+
+    if (fechaDesde || fechaHasta) {
+      filtro.fecha_reporte = {};
+      if (fechaDesde) filtro.fecha_reporte.$gte = fechaDesde;
+      if (fechaHasta) filtro.fecha_reporte.$lte = fechaHasta;
+    }
+
+    const selectFields = 'codigo titulo estado numero_rds fecha_reporte hora_inicio hora_fin revisado_por cabecera periodo inocar_fecha inocar_pleamar inocar_bajamar elaborado_por colaboradores novedades creado_en actualizado_en';
+
+    if (!page && !limit) {
+      const reportes = await Reporte.find(filtro)
+        .sort({ actualizado_en: -1 })
+        .select(selectFields);
+
+      return res.json({
+        ok: true,
+        total: reportes.length,
+        reportes
+      });
+    }
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 15));
+    const skip = (pageNum - 1) * limitNum;
+
+    const [reportes, total] = await Promise.all([
+      Reporte.find(filtro)
+        .sort({ actualizado_en: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .select(selectFields),
+      Reporte.countDocuments(filtro)
+    ]);
+
+    const totalPages = Math.ceil(total / limitNum) || 1;
+
+    return res.json({
+      ok: true,
+      total,
+      reportes,
+      data: reportes,
+      paginacion: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        totalPages,
+        hasNextPage: pageNum < totalPages,
+        hasPrevPage: pageNum > 1
+      }
+    });
   } catch (error) {
+    logger.error(`Error al listar reportes: ${error.message}`, { stack: error.stack });
     return res.status(500).json({ ok: false, mensaje: 'Error al listar reportes', error: error.message });
   }
 };
+
 
 exports.crearReporte = async (req, res) => {
   try {
