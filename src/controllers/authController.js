@@ -1,13 +1,11 @@
 const jwt = require('jsonwebtoken');
 const logger = require('../config/logger');
-const Usuario = require('../models/Usuario');
-const Sesion = require('../models/Sesion');
-const Auditoria = require('../models/Auditoria');
+const { Usuario, Sesion, Auditoria } = require('../models');
 
 const generarToken = (usuario) => {
   const secret = process.env.JWT_SECRET || 'fallback_secret_key';
   return jwt.sign(
-    { id: usuario._id, correo: usuario.correo, nombre: usuario.nombre, rol: usuario.rol },
+    { id: usuario.id, correo: usuario.correo, nombre: usuario.nombre, rol: usuario.rol },
     secret,
     { expiresIn: '24h' }
   );
@@ -35,47 +33,44 @@ exports.registrar = async (req, res) => {
       });
     }
 
-    const usuarioExiste = await Usuario.findOne({ correo: correoNormalizado });
+    const usuarioExiste = await Usuario.findOne({ where: { correo: correoNormalizado } });
 
     if (usuarioExiste) {
       logger.warn(`Registro rechazado: el correo ya se encuentra registrado`, { correo });
       return res.status(400).json({ ok: false, mensaje: 'El correo ya está registrado' });
     }
 
-    const nuevoUsuario = new Usuario({
-      correo: correo.toLowerCase().trim(),
+    const nuevoUsuario = await Usuario.create({
+      correo: correoNormalizado,
       password,
-      nombre: nombre || correo.split('@')[0],
+      nombre: nombre || correoNormalizado.split('@')[0],
       rol: rol || 'operador',
     });
 
-    await nuevoUsuario.save();
-
     const token = generarToken(nuevoUsuario);
-    const sesion = new Sesion({
-      usuario_id: nuevoUsuario._id,
+    const sesion = await Sesion.create({
+      usuario_id: nuevoUsuario.id,
       token,
       ip,
       user_agent: req.headers['user-agent'] || 'Web Client',
     });
-    await sesion.save();
 
     await Auditoria.create({
-      usuario_id: nuevoUsuario._id,
-      usuario_correo: nuevoUsuario.correo,
-      entidad: 'USUARIO',
+      usuario_id: nuevoUsuario.id,
       accion: 'REGISTRO',
+      tabla_afectada: 'usuario',
+      registro_id: nuevoUsuario.id,
       detalles: { correo: nuevoUsuario.correo, nombre: nuevoUsuario.nombre },
       ip,
     });
 
-    logger.info(`Usuario registrado exitosamente: ${nuevoUsuario.correo}`, { id: nuevoUsuario._id });
+    logger.info(`Usuario registrado exitosamente: ${nuevoUsuario.correo}`, { id: nuevoUsuario.id });
     return res.status(201).json({
       ok: true,
       mensaje: 'Usuario registrado exitosamente',
       token,
       usuario: {
-        id: nuevoUsuario._id,
+        id: nuevoUsuario.id,
         correo: nuevoUsuario.correo,
         nombre: nuevoUsuario.nombre,
         rol: nuevoUsuario.rol,
@@ -99,7 +94,7 @@ exports.login = async (req, res) => {
       return res.status(400).json({ ok: false, mensaje: 'Ingrese correo y contraseña' });
     }
 
-    const usuario = await Usuario.findOne({ correo: correo.toLowerCase().trim() });
+    const usuario = await Usuario.findOne({ where: { correo: correo.toLowerCase().trim() } });
     if (!usuario) {
       logger.warn(`Login fallido: usuario no registrado`, { correo });
       return res.status(401).json({ ok: false, mensaje: 'Credenciales inválidas (usuario no registrado)' });
@@ -112,33 +107,33 @@ exports.login = async (req, res) => {
     }
 
     const token = generarToken(usuario);
-    const sesion = new Sesion({
-      usuario_id: usuario._id,
+    const sesion = await Sesion.create({
+      usuario_id: usuario.id,
       token,
       ip,
       user_agent: req.headers['user-agent'] || 'Web Client',
     });
-    await sesion.save();
 
     await Auditoria.create({
-      usuario_id: usuario._id,
-      usuario_correo: usuario.correo,
-      entidad: 'SESION',
+      usuario_id: usuario.id,
       accion: 'LOGIN',
-      detalles: { sesion_id: sesion._id, ip },
+      tabla_afectada: 'sesion',
+      registro_id: sesion.id,
+      detalles: { token, ip },
       ip,
     });
 
-    logger.info(`Login exitoso para: ${usuario.correo}`, { id: usuario._id });
+    logger.info(`Login exitoso para: ${usuario.correo}`, { id: usuario.id });
     return res.json({
       ok: true,
       mensaje: 'Inicio de sesión exitoso',
       token,
       usuario: {
-        id: usuario._id,
+        id: usuario.id,
         correo: usuario.correo,
         nombre: usuario.nombre,
         rol: usuario.rol,
+        requiere_cambio_pw: usuario.requiere_cambio_pw,
       }
     });
   } catch (error) {
@@ -150,7 +145,7 @@ exports.login = async (req, res) => {
 exports.logout = async (req, res) => {
   try {
     if (req.sesionId) {
-      await Sesion.findByIdAndUpdate(req.sesionId, { activo: false, ultimo_acceso: new Date() });
+      await Sesion.destroy({ where: { id: req.sesionId } });
     }
     logger.info(`Sesión cerrada para sesión ID: ${req.sesionId}`);
     return res.json({ ok: true, mensaje: 'Sesión cerrada correctamente' });
@@ -159,7 +154,6 @@ exports.logout = async (req, res) => {
     return res.status(500).json({ ok: false, mensaje: 'Error al cerrar sesión' });
   }
 };
-
 
 exports.perfil = async (req, res) => {
   return res.json({
@@ -182,19 +176,19 @@ exports.chpass = async (req, res) => {
     }
 
     const esAdmin = solicitante && solicitante.rol === 'admin';
-    const targetUserId = (esAdmin && usuarioId) ? usuarioId : solicitante?._id;
+    const targetUserId = (esAdmin && usuarioId) ? usuarioId : solicitante?.id;
 
     if (!targetUserId) {
       return res.status(400).json({ ok: false, mensaje: 'ID de usuario no especificado' });
     }
 
-    const usuarioTarget = await Usuario.findById(targetUserId);
+    const usuarioTarget = await Usuario.findByPk(targetUserId);
     if (!usuarioTarget) {
       logger.warn(`Intento de cambio de contraseña a usuario inexistente: ${targetUserId}`);
       return res.status(404).json({ ok: false, mensaje: 'Usuario no encontrado' });
     }
 
-    const esPropiaCuenta = solicitante && solicitante._id.toString() === usuarioTarget._id.toString();
+    const esPropiaCuenta = solicitante && Number(solicitante.id) === Number(usuarioTarget.id);
     if (!esAdmin || esPropiaCuenta) {
       if (!currentPassword) {
         return res.status(400).json({
@@ -221,17 +215,16 @@ exports.chpass = async (req, res) => {
     usuarioTarget.requiere_cambio_pw = false;
     await usuarioTarget.save();
 
-    // Invalidar sesiones activas del usuario para forzar re-login con la nueva clave
-    await Sesion.updateMany({ usuario_id: usuarioTarget._id, activo: true }, { activo: false });
+    await Sesion.destroy({ where: { usuario_id: usuarioTarget.id } });
 
     await Auditoria.create({
-      usuario_id: solicitante?._id,
-      usuario_correo: solicitante?.correo,
-      entidad: 'USUARIO',
+      usuario_id: solicitante?.id,
       accion: 'CAMBIO_PASSWORD',
+      tabla_afectada: 'usuario',
+      registro_id: usuarioTarget.id,
       detalles: {
         usuario_afectado: usuarioTarget.correo,
-        usuario_afectado_id: usuarioTarget._id,
+        usuario_afectado_id: usuarioTarget.id,
         cambiado_por_admin: esAdmin && !esPropiaCuenta,
         ip
       },
@@ -249,4 +242,5 @@ exports.chpass = async (req, res) => {
     return res.status(500).json({ ok: false, mensaje: 'Error al cambiar contraseña', error: error.message });
   }
 };
+
 

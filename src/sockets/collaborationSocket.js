@@ -1,9 +1,134 @@
 const jwt = require('jsonwebtoken');
-const Reporte = require('../models/Reporte');
-const Auditoria = require('../models/Auditoria');
+const { Reporte, ReporteColaborador, Novedad, NovedadFoto, Usuario, Auditoria } = require('../models');
 
 const locksPorReporte = new Map();
 const usuariosEnReporte = new Map();
+
+// Helper para registrar/actualizar colaboración en la tabla intermedia y recalcular elaborado_por
+const registrarColaboracionSocket = async (reporteId, usuarioId) => {
+  if (!reporteId || !usuarioId) return { colaboradores: [], elaboradoPor: '' };
+
+  const [colaborador, creado] = await ReporteColaborador.findOrCreate({
+    where: { reporte_id: reporteId, usuario_id: usuarioId },
+    defaults: {
+      primer_aporte: new Date(),
+      ultimo_aporte: new Date(),
+      total_ediciones: 1,
+    }
+  });
+
+  if (!creado) {
+    colaborador.ultimo_aporte = new Date();
+    colaborador.total_ediciones += 1;
+    await colaborador.save();
+  }
+
+  const colaboraciones = await ReporteColaborador.findAll({
+    where: { reporte_id: reporteId },
+    include: [{ model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo'] }],
+    order: [['primer_aporte', 'ASC']]
+  });
+
+  const listaColaboradores = colaboraciones.map(c => ({
+    usuario_id: c.usuario_id,
+    nombre: c.usuario?.nombre || c.usuario?.correo,
+    correo: c.usuario?.correo,
+    primer_aporte: c.primer_aporte,
+    ultimo_aporte: c.ultimo_aporte,
+    total_ediciones: c.total_ediciones,
+  }));
+
+  const nombres = listaColaboradores.map(c => c.nombre || c.correo).filter(Boolean);
+  const elaboradoPor = [...new Set(nombres)].join(' – ');
+
+  await Reporte.update({ elaborado_por: elaboradoPor }, { where: { id: reporteId } });
+
+  return { colaboradores: listaColaboradores, elaboradoPor };
+};
+
+// Helper para serializar el reporte en un formato 100% compatible con el frontend
+const serializarReporteParaSocket = async (reporteId) => {
+  const reporte = await Reporte.findByPk(reporteId, {
+    include: [
+      {
+        model: ReporteColaborador,
+        as: 'reporte_colaboradores',
+        include: [{ model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo', 'rol'] }]
+      },
+      {
+        model: Novedad,
+        as: 'novedades',
+        include: [
+          { model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo'] },
+          { model: NovedadFoto, as: 'fotos' }
+        ]
+      }
+    ]
+  });
+
+  if (!reporte) return null;
+
+  const repJson = reporte.toJSON();
+  const colaboradores = (repJson.reporte_colaboradores || []).map(c => ({
+    usuario_id: c.usuario_id,
+    nombre: c.usuario?.nombre || c.usuario?.correo,
+    correo: c.usuario?.correo,
+    primer_aporte: c.primer_aporte,
+    ultimo_aporte: c.ultimo_aporte,
+    total_ediciones: c.total_ediciones,
+  }));
+
+  const novedades = (repJson.novedades || []).map(nov => ({
+    _id: nov.id,
+    id: nov.id,
+    reporte_id: nov.reporte_id,
+    usuario_id: nov.usuario_id,
+    usuario_nombre: nov.usuario?.nombre || nov.usuario?.correo,
+    tipo: nov.tipo,
+    tipo_evento: nov.tipo,
+    direccion: nov.direccion,
+    aga: nov.aga,
+    instituciones: nov.instituciones,
+    fecha: nov.fecha,
+    fecha_evento: nov.fecha ? new Date(nov.fecha).toISOString().split('T')[0] : '',
+    hora_evento: nov.fecha ? new Date(nov.fecha).toTimeString().split(' ')[0].substring(0, 5) : '',
+    latitud: nov.latitud,
+    longitud: nov.longitud,
+    recurso: nov.recurso,
+    recurso_asignado: nov.recurso,
+    estado: nov.estado,
+    estado_operativo: nov.estado,
+    descripcion: nov.descripcion,
+    acciones: nov.acciones,
+    acciones_inmediatas: nov.acciones,
+    fotos: (nov.fotos || []).map(f => f.url_foto),
+    datos_adicionales: nov.datos_adicionales,
+    created_at: nov.created_at,
+    updated_at: nov.updated_at,
+  }));
+
+  return {
+    _id: repJson.id,
+    id: repJson.id,
+    codigo: repJson.codigo,
+    titulo: repJson.titulo,
+    numero_rds: repJson.numero_rds,
+    fecha: repJson.fecha,
+    fecha_reporte: repJson.fecha,
+    hora_inicio: repJson.hora_inicio || '06:00',
+    hora_fin: repJson.hora_fin || '22:00',
+    revisado_por: repJson.revisado_por,
+    cabecera: repJson.cabecera,
+    periodo: repJson.periodo,
+    inocar_fecha: repJson.inocar_fecha,
+    inocar_pleamar: repJson.inocar_pleamar,
+    inocar_bajamar: repJson.inocar_bajamar,
+    observaciones_generales: repJson.observaciones_generales,
+    elaborado_por: repJson.elaborado_por,
+    colaboradores,
+    novedades,
+  };
+};
 
 function initCollaborationSockets(io) {
   io.use((socket, next) => {
@@ -24,53 +149,55 @@ function initCollaborationSockets(io) {
   io.on('connection', (socket) => {
     const usuario = socket.usuario;
 
+    // 1. UNIRSE A LA SALA DE UN REPORTE
     socket.on('unirse_reporte', async ({ reporteId }) => {
       try {
-        socket.join(`reporte_${reporteId}`);
-        socket.reporteActual = reporteId;
+        const idNum = Number(reporteId);
+        if (!idNum) return;
 
-        if (!usuariosEnReporte.has(reporteId)) {
-          usuariosEnReporte.set(reporteId, new Map());
+        socket.join(`reporte_${idNum}`);
+        socket.reporteActual = idNum;
+
+        if (!usuariosEnReporte.has(idNum)) {
+          usuariosEnReporte.set(idNum, new Map());
         }
-        usuariosEnReporte.get(reporteId).set(socket.id, {
+        usuariosEnReporte.get(idNum).set(socket.id, {
           usuarioId: usuario.id,
           nombre: usuario.nombre || usuario.correo,
           correo: usuario.correo,
         });
 
-        if (!locksPorReporte.has(reporteId)) {
-          locksPorReporte.set(reporteId, {});
+        if (!locksPorReporte.has(idNum)) {
+          locksPorReporte.set(idNum, {});
         }
 
-        const reporte = await Reporte.findById(reporteId);
-        if (!reporte || reporte.eliminado) {
+        const reporteRes = await serializarReporteParaSocket(idNum);
+        if (!reporteRes) {
           socket.emit('error_socket', { mensaje: 'Reporte no encontrado o eliminado' });
           return;
         }
 
-        const reporteRes = reporte.toObject();
-        reporteRes.novedades = (reporteRes.novedades || []).filter(n => !n.eliminado);
-
         socket.emit('reporte_cargado', {
           reporte: reporteRes,
-          locks: locksPorReporte.get(reporteId),
-          usuariosActivos: Array.from(usuariosEnReporte.get(reporteId).values()),
+          locks: locksPorReporte.get(idNum),
+          usuariosActivos: Array.from(usuariosEnReporte.get(idNum).values()),
         });
 
-        io.to(`reporte_${reporteId}`).emit('usuarios_actualizados', {
-          usuariosActivos: Array.from(usuariosEnReporte.get(reporteId).values()),
+        io.to(`reporte_${idNum}`).emit('usuarios_actualizados', {
+          usuariosActivos: Array.from(usuariosEnReporte.get(idNum).values()),
         });
-
       } catch (error) {
         socket.emit('error_socket', { mensaje: 'Error al unirse al reporte', error: error.message });
       }
     });
 
+    // 2. CONTROL DE LOCKS CONCURRENTES
     socket.on('lock_campo', ({ reporteId, campoKey }) => {
-      if (!locksPorReporte.has(reporteId)) {
-        locksPorReporte.set(reporteId, {});
+      const idNum = Number(reporteId);
+      if (!locksPorReporte.has(idNum)) {
+        locksPorReporte.set(idNum, {});
       }
-      const locks = locksPorReporte.get(reporteId);
+      const locks = locksPorReporte.get(idNum);
 
       if (locks[campoKey] && locks[campoKey].usuarioId !== usuario.id) {
         socket.emit('lock_denegado', {
@@ -87,7 +214,7 @@ function initCollaborationSockets(io) {
         timestamp: Date.now(),
       };
 
-      io.to(`reporte_${reporteId}`).emit('campo_bloqueado', {
+      io.to(`reporte_${idNum}`).emit('campo_bloqueado', {
         campoKey,
         usuarioId: usuario.id,
         usuarioNombre: usuario.nombre || usuario.correo,
@@ -95,109 +222,139 @@ function initCollaborationSockets(io) {
     });
 
     socket.on('unlock_campo', ({ reporteId, campoKey }) => {
-      const locks = locksPorReporte.get(reporteId);
+      const idNum = Number(reporteId);
+      const locks = locksPorReporte.get(idNum);
       if (locks && locks[campoKey] && locks[campoKey].usuarioId === usuario.id) {
         delete locks[campoKey];
-        io.to(`reporte_${reporteId}`).emit('campo_liberado', { campoKey });
+        io.to(`reporte_${idNum}`).emit('campo_liberado', { campoKey });
       }
     });
 
+    // 3. AGREGAR NOVEDAD VÍA SOCKET
     socket.on('agregar_novedad', async ({ reporteId, novedad }) => {
       try {
-        const reporte = await Reporte.findById(reporteId);
-        if (!reporte || reporte.eliminado) return;
+        const idNum = Number(reporteId);
+        const reporte = await Reporte.findByPk(idNum);
+        if (!reporte) return;
 
-        const nuevaNovedad = {
-          usuario_id: usuario.id,
-          usuario_nombre: usuario.nombre || usuario.correo,
-          tipo_evento: novedad.tipo_evento || 'AGUA',
-          direccion: novedad.direccion || 'Sin dirección',
-          aga: novedad.aga || 'A09',
-          instituciones: novedad.instituciones || '@emapagye @interagua',
-          fecha_evento: novedad.fecha_evento || new Date().toISOString().split('T')[0],
-          hora_evento: novedad.hora_evento || '12:00',
-          latitud: novedad.latitud !== undefined ? Number(novedad.latitud) : -2.1894,
-          longitud: novedad.longitud !== undefined ? Number(novedad.longitud) : -79.8891,
-          recurso_asignado: novedad.recurso_asignado || 'INS-ALC 🚙',
-          estado_operativo: novedad.estado_operativo || '⛔PENDIENTE',
-          descripcion: novedad.descripcion || '',
-          acciones_inmediatas: novedad.acciones_inmediatas || '',
-          fotos: Array.isArray(novedad.fotos) ? novedad.fotos : [],
-        };
-
-        reporte.novedades.push(nuevaNovedad);
-
-        const colabIndex = reporte.colaboradores.findIndex(c => c.usuario_id.toString() === usuario.id);
-        if (colabIndex >= 0) {
-          reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
-          reporte.colaboradores[colabIndex].total_ediciones += 1;
-        } else {
-          reporte.colaboradores.push({
-            usuario_id: usuario.id,
-            nombre: usuario.nombre || usuario.correo,
-            correo: usuario.correo,
-            primer_aporte: new Date(),
-            ultimo_aporte: new Date(),
-            total_ediciones: 1,
-          });
+        let parsedDatosAdicionales = novedad.datos_adicionales;
+        if (typeof novedad.datos_adicionales === 'string') {
+          try { parsedDatosAdicionales = JSON.parse(novedad.datos_adicionales); } catch { parsedDatosAdicionales = {}; }
         }
 
-        await reporte.save();
-
-        io.to(`reporte_${reporteId}`).emit('novedad_agregada', {
-          novedad: reporte.novedades[reporte.novedades.length - 1],
-          colaboradores: reporte.colaboradores,
-          elaborado_por: reporte.elaborado_por,
+        const nuevaNovedad = await Novedad.create({
+          reporte_id: idNum,
+          usuario_id: usuario.id,
+          tipo: novedad.tipo || novedad.tipo_evento || 'AGUA',
+          direccion: novedad.direccion || '',
+          aga: novedad.aga || 'A09',
+          instituciones: novedad.instituciones || '@emapagye @interagua',
+          fecha: novedad.fecha ? new Date(novedad.fecha) : new Date(),
+          latitud: novedad.latitud !== undefined ? Number(novedad.latitud) : -2.1894,
+          longitud: novedad.longitud !== undefined ? Number(novedad.longitud) : -79.8891,
+          recurso: novedad.recurso || novedad.recurso_asignado || '',
+          estado: novedad.estado || novedad.estado_operativo || 'PENDIENTE',
+          descripcion: novedad.descripcion || '',
+          acciones: novedad.acciones || novedad.acciones_inmediatas || '',
+          datos_adicionales: parsedDatosAdicionales || null,
         });
 
+        // Registrar fotos si vienen URLs
+        if (Array.isArray(novedad.fotos) && novedad.fotos.length > 0) {
+          for (const url of novedad.fotos) {
+            await NovedadFoto.create({ novedad_id: nuevaNovedad.id, url_foto: url });
+          }
+        }
+
+        const { colaboradores, elaboradoPor } = await registrarColaboracionSocket(idNum, usuario.id);
+
+        await Auditoria.create({
+          usuario_id: usuario.id,
+          accion: 'CREAR',
+          tabla_afectada: 'novedad',
+          registro_id: nuevaNovedad.id,
+          detalles: { reporte_id: idNum, tipo: nuevaNovedad.tipo, direccion: nuevaNovedad.direccion },
+        });
+
+        const novedadRes = {
+          _id: nuevaNovedad.id,
+          id: nuevaNovedad.id,
+          reporte_id: idNum,
+          usuario_id: usuario.id,
+          usuario_nombre: usuario.nombre || usuario.correo,
+          tipo: nuevaNovedad.tipo,
+          tipo_evento: nuevaNovedad.tipo,
+          direccion: nuevaNovedad.direccion,
+          aga: nuevaNovedad.aga,
+          instituciones: nuevaNovedad.instituciones,
+          fecha: nuevaNovedad.fecha,
+          fecha_evento: nuevaNovedad.fecha ? new Date(nuevaNovedad.fecha).toISOString().split('T')[0] : '',
+          hora_evento: nuevaNovedad.fecha ? new Date(nuevaNovedad.fecha).toTimeString().split(' ')[0].substring(0, 5) : '',
+          latitud: nuevaNovedad.latitud,
+          longitud: nuevaNovedad.longitud,
+          recurso: nuevaNovedad.recurso,
+          recurso_asignado: nuevaNovedad.recurso,
+          estado: nuevaNovedad.estado,
+          estado_operativo: nuevaNovedad.estado,
+          descripcion: nuevaNovedad.descripcion,
+          acciones: nuevaNovedad.acciones,
+          acciones_inmediatas: nuevaNovedad.acciones,
+          fotos: Array.isArray(novedad.fotos) ? novedad.fotos : [],
+          datos_adicionales: nuevaNovedad.datos_adicionales,
+          created_at: nuevaNovedad.created_at,
+          updated_at: nuevaNovedad.updated_at,
+        };
+
+        io.to(`reporte_${idNum}`).emit('novedad_agregada', {
+          novedad: novedadRes,
+          colaboradores,
+          elaborado_por: elaboradoPor,
+        });
       } catch (err) {
-        socket.emit('error_socket', { mensaje: 'Error al agregar novedad', error: err.message });
+        socket.emit('error_socket', { mensaje: 'Error al agregar novedad vía socket', error: err.message });
       }
     });
 
+    // 4. ACTUALIZAR PARÁMETROS DEL REPORTE
     socket.on('actualizar_parametros', async ({ reporteId, parametros }) => {
       try {
-        const reporte = await Reporte.findById(reporteId);
-        if (!reporte || reporte.eliminado) return;
+        const idNum = Number(reporteId);
+        const reporte = await Reporte.findByPk(idNum);
+        if (!reporte) return;
 
         const campos = [
-          'titulo', 'observaciones_generales', 'numero_rds', 'fecha_reporte',
+          'titulo', 'observaciones_generales', 'numero_rds', 'fecha',
           'hora_inicio', 'hora_fin', 'revisado_por', 'cabecera', 'periodo',
           'inocar_fecha', 'inocar_pleamar', 'inocar_bajamar'
         ];
 
-        campos.forEach((campo) => {
-          if (parametros[campo] !== undefined) {
-            reporte[campo] = parametros[campo];
-          }
+        campos.forEach(c => {
+          if (parametros[c] !== undefined) reporte[c] = parametros[c];
         });
 
-        // Registrar o actualizar al usuario modificador como colaborador
-        if (usuario && usuario.id) {
-          const colabIndex = reporte.colaboradores.findIndex(
-            c => c.usuario_id.toString() === usuario.id.toString()
-          );
-          if (colabIndex >= 0) {
-            reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
-            reporte.colaboradores[colabIndex].total_ediciones += 1;
-          } else {
-            reporte.colaboradores.push({
-              usuario_id: usuario.id,
-              nombre: usuario.nombre || usuario.correo,
-              correo: usuario.correo,
-              primer_aporte: new Date(),
-              ultimo_aporte: new Date(),
-              total_ediciones: 1,
-            });
-          }
+        if (parametros.fecha_reporte !== undefined) {
+          reporte.fecha = parametros.fecha_reporte;
         }
 
         await reporte.save();
+        const { colaboradores, elaboradoPor } = await registrarColaboracionSocket(idNum, usuario.id);
 
-        io.to(`reporte_${reporteId}`).emit('parametros_actualizados', {
-          reporteId,
-          parametros,
-          colaboradores: reporte.colaboradores,
+        await Auditoria.create({
+          usuario_id: usuario.id,
+          accion: 'EDITAR',
+          tabla_afectada: 'reporte',
+          registro_id: idNum,
+          detalles: { parametros },
+        });
+
+        io.to(`reporte_${idNum}`).emit('parametros_actualizados', {
+          reporteId: idNum,
+          parametros: {
+            ...parametros,
+            fecha_reporte: reporte.fecha,
+          },
+          colaboradores,
+          elaborado_por: elaboradoPor,
           actualizadoPor: usuario.nombre || usuario.correo,
         });
       } catch (err) {
@@ -205,147 +362,146 @@ function initCollaborationSockets(io) {
       }
     });
 
+    // 5. ACTUALIZAR NOVEDAD VÍA SOCKET
     socket.on('actualizar_novedad', async ({ reporteId, novedadId, cambios }) => {
       try {
-        const reporte = await Reporte.findById(reporteId);
-        if (!reporte || reporte.eliminado) return;
+        const idNum = Number(reporteId);
+        const novIdNum = Number(novedadId);
 
-        const novedad = reporte.novedades.id(novedadId);
-        if (!novedad || novedad.eliminado) return;
+        const novedad = await Novedad.findOne({ where: { id: novIdNum, reporte_id: idNum } });
+        if (!novedad) return;
 
-        const campos = [
-          'tipo_evento', 'direccion', 'aga', 'instituciones', 'fecha_evento',
-          'hora_evento', 'latitud', 'longitud', 'recurso_asignado', 'estado_operativo',
-          'descripcion', 'acciones_inmediatas', 'fotos', 'estado_novedad', 'solucionado'
-        ];
-
-        campos.forEach((campo) => {
-          if (cambios && cambios[campo] !== undefined) {
-            novedad[campo] = cambios[campo];
-          }
+        const campos = ['tipo', 'direccion', 'aga', 'instituciones', 'latitud', 'longitud', 'recurso', 'estado', 'descripcion', 'acciones'];
+        campos.forEach(c => {
+          if (cambios[c] !== undefined) novedad[c] = cambios[c];
         });
 
-        // Registrar o actualizar al usuario modificador como colaborador
-        if (usuario && usuario.id) {
-          const colabIndex = reporte.colaboradores.findIndex(
-            c => c.usuario_id.toString() === usuario.id.toString()
-          );
-          if (colabIndex >= 0) {
-            reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
-            reporte.colaboradores[colabIndex].total_ediciones += 1;
-          } else {
-            reporte.colaboradores.push({
-              usuario_id: usuario.id,
-              nombre: usuario.nombre || usuario.correo,
-              correo: usuario.correo,
-              primer_aporte: new Date(),
-              ultimo_aporte: new Date(),
-              total_ediciones: 1,
-            });
-          }
+        if (cambios.tipo_evento !== undefined) novedad.tipo = cambios.tipo_evento;
+        if (cambios.recurso_asignado !== undefined) novedad.recurso = cambios.recurso_asignado;
+        if (cambios.estado_operativo !== undefined) novedad.estado = cambios.estado_operativo;
+        if (cambios.acciones_inmediatas !== undefined) novedad.acciones = cambios.acciones_inmediatas;
+        if (cambios.fecha !== undefined) novedad.fecha = new Date(cambios.fecha);
+        if (cambios.fecha_evento !== undefined) novedad.fecha = new Date(cambios.fecha_evento);
+
+        if (cambios.datos_adicionales !== undefined) {
+          novedad.datos_adicionales = cambios.datos_adicionales;
         }
 
-        await reporte.save();
-
-        io.to(`reporte_${reporteId}`).emit('novedad_actualizada', {
-          novedad,
-          colaboradores: reporte.colaboradores,
-          elaborado_por: reporte.elaborado_por,
-          actualizadoPor: usuario.nombre || usuario.correo,
-        });
-      } catch (err) {
-        socket.emit('error_socket', { mensaje: 'Error al actualizar novedad', error: err.message });
-      }
-    });
-
-    socket.on('eliminar_novedad', async ({ reporteId, novedadId }) => {
-      try {
-        const reporte = await Reporte.findById(reporteId);
-        if (!reporte || reporte.eliminado) return;
-
-        const novedad = reporte.novedades.id(novedadId);
-        if (!novedad || novedad.eliminado) return;
-
-        // Soft delete novedad
-        novedad.eliminado = true;
-        novedad.eliminado_en = new Date();
-
-        if (usuario && usuario.id) {
-          const colabIndex = reporte.colaboradores.findIndex(
-            c => c.usuario_id.toString() === usuario.id.toString()
-          );
-          if (colabIndex >= 0) {
-            reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
-            reporte.colaboradores[colabIndex].total_ediciones += 1;
-          }
-        }
-
-        await reporte.save();
-
-        io.to(`reporte_${reporteId}`).emit('novedad_eliminada', {
-          novedadId,
-          colaboradores: reporte.colaboradores,
-          elaborado_por: reporte.elaborado_por,
-          eliminadoPor: usuario.nombre || usuario.correo,
-        });
-      } catch (err) {
-        socket.emit('error_socket', { mensaje: 'Error al eliminar novedad', error: err.message });
-      }
-    });
-
-    socket.on('eliminar_reporte', async ({ reporteId }) => {
-      try {
-        const reporte = await Reporte.findById(reporteId);
-        if (!reporte || reporte.eliminado) {
-          socket.emit('error_socket', { mensaje: 'Reporte no encontrado' });
-          return;
-        }
-
-        const detalles = {
-          codigo: reporte.codigo,
-          titulo: reporte.titulo,
-          numero_rds: reporte.numero_rds,
-          total_novedades: reporte.novedades?.filter(n => !n.eliminado).length || 0,
-          tipo_eliminacion: 'SOFT_DELETE',
-        };
-
-        // Soft delete reporte
-        reporte.eliminado = true;
-        reporte.eliminado_en = new Date();
-        await reporte.save();
+        await novedad.save();
+        const { colaboradores, elaboradoPor } = await registrarColaboracionSocket(idNum, usuario.id);
 
         await Auditoria.create({
           usuario_id: usuario.id,
-          usuario_correo: usuario.correo,
-          reporte_id: reporteId,
-          entidad: 'REPORTE',
-          accion: 'ELIMINAR',
-          detalles,
+          accion: 'EDITAR',
+          tabla_afectada: 'novedad',
+          registro_id: novIdNum,
+          detalles: { reporte_id: idNum, cambios },
         });
 
-        io.to(`reporte_${reporteId}`).emit('reporte_eliminado', {
-          reporteId,
-          detalles,
-          eliminadoPor: usuario.nombre || usuario.correo,
-        });
+        const novedadRes = {
+          _id: novedad.id,
+          id: novedad.id,
+          reporte_id: idNum,
+          usuario_id: novedad.usuario_id,
+          tipo: novedad.tipo,
+          tipo_evento: novedad.tipo,
+          direccion: novedad.direccion,
+          aga: novedad.aga,
+          instituciones: novedad.instituciones,
+          fecha: novedad.fecha,
+          fecha_evento: novedad.fecha ? new Date(novedad.fecha).toISOString().split('T')[0] : '',
+          hora_evento: novedad.fecha ? new Date(novedad.fecha).toTimeString().split(' ')[0].substring(0, 5) : '',
+          latitud: novedad.latitud,
+          longitud: novedad.longitud,
+          recurso: novedad.recurso,
+          recurso_asignado: novedad.recurso,
+          estado: novedad.estado,
+          estado_operativo: novedad.estado,
+          descripcion: novedad.descripcion,
+          acciones: novedad.acciones,
+          acciones_inmediatas: novedad.acciones,
+          datos_adicionales: novedad.datos_adicionales,
+        };
 
-        // Limpiar locks y usuarios del reporte en memoria
-        locksPorReporte.delete(reporteId);
-        usuariosEnReporte.delete(reporteId);
+        io.to(`reporte_${idNum}`).emit('novedad_actualizada', {
+          novedad: novedadRes,
+          colaboradores,
+          elaborado_por: elaboradoPor,
+          actualizadoPor: usuario.nombre || usuario.correo,
+        });
       } catch (err) {
-        socket.emit('error_socket', { mensaje: 'Error al eliminar reporte', error: err.message });
+        socket.emit('error_socket', { mensaje: 'Error al actualizar novedad vía socket', error: err.message });
       }
     });
 
+    // 6. ELIMINAR NOVEDAD VÍA SOCKET
+    socket.on('eliminar_novedad', async ({ reporteId, novedadId }) => {
+      try {
+        const idNum = Number(reporteId);
+        const novIdNum = Number(novedadId);
+
+        const novedad = await Novedad.findOne({ where: { id: novIdNum, reporte_id: idNum } });
+        if (!novedad) return;
+
+        await novedad.destroy(); // Soft delete
+        const { colaboradores, elaboradoPor } = await registrarColaboracionSocket(idNum, usuario.id);
+
+        await Auditoria.create({
+          usuario_id: usuario.id,
+          accion: 'ELIMINAR',
+          tabla_afectada: 'novedad',
+          registro_id: novIdNum,
+          detalles: { reporte_id: idNum, direccion: novedad.direccion },
+        });
+
+        io.to(`reporte_${idNum}`).emit('novedad_eliminada', {
+          novedadId: novIdNum,
+          colaboradores,
+          elaborado_por: elaboradoPor,
+          eliminadoPor: usuario.nombre || usuario.correo,
+        });
+      } catch (err) {
+        socket.emit('error_socket', { mensaje: 'Error al eliminar novedad vía socket', error: err.message });
+      }
+    });
+
+    // 7. ELIMINAR REPORTE COMPLETO VÍA SOCKET
+    socket.on('eliminar_reporte', async ({ reporteId }) => {
+      try {
+        const idNum = Number(reporteId);
+        const reporte = await Reporte.findByPk(idNum);
+        if (!reporte) return;
+
+        await reporte.destroy(); // Soft delete
+
+        await Auditoria.create({
+          usuario_id: usuario.id,
+          accion: 'ELIMINAR',
+          tabla_afectada: 'reporte',
+          registro_id: idNum,
+          detalles: { codigo: reporte.codigo, titulo: reporte.titulo },
+        });
+
+        io.to(`reporte_${idNum}`).emit('reporte_eliminado', {
+          reporteId: idNum,
+          eliminadoPor: usuario.nombre || usuario.correo,
+        });
+
+        locksPorReporte.delete(idNum);
+        usuariosEnReporte.delete(idNum);
+      } catch (err) {
+        socket.emit('error_socket', { mensaje: 'Error al eliminar reporte vía socket', error: err.message });
+      }
+    });
+
+    // 8. DESCONEXIÓN DE USUARIO
     socket.on('disconnect', () => {
       const reporteId = socket.reporteActual;
-      if (reporteId) {
-        if (usuariosEnReporte.has(reporteId)) {
-          usuariosEnReporte.get(reporteId).delete(socket.id);
-          io.to(`reporte_${reporteId}`).emit('usuarios_actualizados', {
-            usuariosActivos: Array.from(usuariosEnReporte.get(reporteId).values()),
-          });
-        }
+      if (reporteId && usuariosEnReporte.has(reporteId)) {
+        usuariosEnReporte.get(reporteId).delete(socket.id);
+        io.to(`reporte_${reporteId}`).emit('usuarios_actualizados', {
+          usuariosActivos: Array.from(usuariosEnReporte.get(reporteId).values()),
+        });
 
         const locks = locksPorReporte.get(reporteId);
         if (locks) {
@@ -362,3 +518,5 @@ function initCollaborationSockets(io) {
 }
 
 module.exports = initCollaborationSockets;
+
+

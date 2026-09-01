@@ -1,43 +1,50 @@
-const mongoose = require('mongoose');
+const { DataTypes, Model } = require('sequelize');
+const { sequelize } = require('../config/database');
 
-const auditoriaSchema = new mongoose.Schema({
+class Auditoria extends Model { }
+
+Auditoria.init({
+  id: {
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey: true,
+  },
   usuario_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Usuario',
-    required: false,
-  },
-  usuario_correo: {
-    type: String,
-    default: 'sistema',
-  },
-  reporte_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Reporte',
-    required: false,
-  },
-  entidad: {
-    type: String,
-    enum: ['USUARIO', 'SESION', 'REPORTE', 'NOVEDAD', 'SISTEMA'],
-    required: true,
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'usuario',
+      key: 'id',
+    },
+    onDelete: 'SET NULL',
   },
   accion: {
-    type: String,
-    enum: ['LOGIN', 'REGISTRO', 'LOGOUT', 'CREAR', 'EDITAR', 'ELIMINAR', 'LOCK_CAMPO', 'UNLOCK_CAMPO', 'CAMBIO_PASSWORD'],
-    required: true,
+    type: DataTypes.ENUM('LOGIN', 'REGISTRO', 'LOGOUT', 'CREAR', 'EDITAR', 'ELIMINAR', 'CAMBIO_PASSWORD'),
+    allowNull: false,
   },
-
+  tabla_afectada: {
+    type: DataTypes.STRING,
+    allowNull: true,
+  },
+  registro_id: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+  },
   detalles: {
-    type: mongoose.Schema.Types.Mixed,
-    default: {},
+    type: DataTypes.JSONB,
+    allowNull: true,
   },
   ip: {
-    type: String,
-    default: '',
+    type: DataTypes.STRING(45),
+    allowNull: true,
   },
-  timestamp: {
-    type: Date,
-    default: Date.now,
-  }
+}, {
+  sequelize,
+  modelName: 'Auditoria',
+  tableName: 'auditoria',
+  paranoid: false,
+  updatedAt: false,
 });
 
-module.exports = mongoose.model('Auditoria', auditoriaSchema);
+module.exports = Auditoria;
+

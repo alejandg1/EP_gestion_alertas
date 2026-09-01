@@ -1,18 +1,20 @@
-const mongoose = require('mongoose');
-const Reporte = require('../models/Reporte');
-const Usuario = require('../models/Usuario');
-const Auditoria = require('../models/Auditoria');
+const { Op } = require('sequelize');
+const { Reporte, ReporteColaborador, Novedad, NovedadFoto, Usuario, Auditoria } = require('../models');
 const logger = require('../config/logger');
-const { sharepointService, COLUMNAS_EXCEL } = require('../services/sharepointService');
 
+// Generador de código secuencial: REP-YYYYMM-XXX
 const generarCodigoReporte = async () => {
   const d = new Date();
   const yearMonth = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}`;
   const prefix = `REP-${yearMonth}-`;
 
-  const reportesMes = await Reporte.find({ codigo: new RegExp(`^${prefix}`) })
-    .select('codigo')
-    .lean();
+  const reportesMes = await Reporte.findAll({
+    where: {
+      codigo: { [Op.like]: `${prefix}%` }
+    },
+    attributes: ['codigo'],
+    paranoid: false,
+  });
 
   let maxNum = 0;
   reportesMes.forEach(r => {
@@ -28,7 +30,7 @@ const generarCodigoReporte = async () => {
   let siguienteNumero = maxNum + 1;
   let codigoCandidato = `${prefix}${String(siguienteNumero).padStart(3, '0')}`;
 
-  while (await Reporte.exists({ codigo: codigoCandidato })) {
+  while (await Reporte.findOne({ where: { codigo: codigoCandidato }, paranoid: false })) {
     siguienteNumero++;
     codigoCandidato = `${prefix}${String(siguienteNumero).padStart(3, '0')}`;
   }
@@ -36,104 +38,147 @@ const generarCodigoReporte = async () => {
   return codigoCandidato;
 };
 
+// Función auxiliar para registrar o actualizar colaboración en la tabla intermedia
+const registrarColaboracion = async (reporteId, usuarioId) => {
+  if (!reporteId || !usuarioId) return;
+
+  const [colaborador, creado] = await ReporteColaborador.findOrCreate({
+    where: { reporte_id: reporteId, usuario_id: usuarioId },
+    defaults: {
+      primer_aporte: new Date(),
+      ultimo_aporte: new Date(),
+      total_ediciones: 1,
+    }
+  });
+
+  if (!creado) {
+    colaborador.ultimo_aporte = new Date();
+    colaborador.total_ediciones += 1;
+    await colaborador.save();
+  }
+
+  // Actualizar string elaborado_por en el Reporte
+  const colaboradores = await ReporteColaborador.findAll({
+    where: { reporte_id: reporteId },
+    include: [{ model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo'] }],
+    order: [['primer_aporte', 'ASC']]
+  });
+
+  const nombres = colaboradores.map(c => c.usuario?.nombre || c.usuario?.correo).filter(Boolean);
+  const elaboradoPor = [...new Set(nombres)].join(' – ');
+
+  await Reporte.update({ elaborado_por: elaboradoPor }, { where: { id: reporteId } });
+};
+
+// Listar reportes
 exports.listarReportes = async (req, res) => {
   try {
-    const { page, limit, busqueda, fechaDesde, fechaHasta, incluirEliminados } = req.query;
+    const { page, limit, busqueda, fechaDesde, fechaHasta } = req.query;
 
-    const filtro = {};
-
-    if (incluirEliminados !== 'true') {
-      filtro.eliminado = { $ne: true };
-    }
+    const where = {};
 
     if (busqueda && busqueda.trim()) {
-      filtro.$or = [
-        { numero_rds: { $regex: busqueda.trim(), $options: 'i' } },
-        { titulo: { $regex: busqueda.trim(), $options: 'i' } },
-        { elaborado_por: { $regex: busqueda.trim(), $options: 'i' } }
+      where[Op.or] = [
+        { numero_rds: { [Op.iLike]: `%${busqueda.trim()}%` } },
+        { titulo: { [Op.iLike]: `%${busqueda.trim()}%` } },
+        { codigo: { [Op.iLike]: `%${busqueda.trim()}%` } },
+        { elaborado_por: { [Op.iLike]: `%${busqueda.trim()}%` } },
       ];
     }
 
     if (fechaDesde || fechaHasta) {
-      filtro.fecha_reporte = {};
-      if (fechaDesde) filtro.fecha_reporte.$gte = fechaDesde;
-      if (fechaHasta) filtro.fecha_reporte.$lte = fechaHasta;
+      where.fecha = {};
+      if (fechaDesde) where.fecha[Op.gte] = fechaDesde;
+      if (fechaHasta) where.fecha[Op.lte] = fechaHasta;
     }
 
-    const selectFields = 'codigo titulo numero_rds fecha_reporte hora_inicio hora_fin revisado_por cabecera periodo inocar_fecha inocar_pleamar inocar_bajamar elaborado_por colaboradores novedades eliminado eliminado_en creado_en actualizado_en';
+    const options = {
+      where,
+      order: [['fecha', 'DESC'], ['id', 'DESC']],
+      include: [
+        {
+          model: ReporteColaborador,
+          as: 'reporte_colaboradores',
+          include: [{ model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo', 'rol'] }]
+        },
+        {
+          model: Novedad,
+          as: 'novedades',
+          include: [
+            { model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo'] },
+            { model: NovedadFoto, as: 'fotos' }
+          ]
+        }
+      ]
+    };
 
-    if (!page && !limit) {
-      let reportes = await Reporte.find(filtro)
-        .sort({ actualizado_en: -1 })
-        .select(selectFields);
+    if (page && limit) {
+      const pageNum = parseInt(page, 10) || 1;
+      const limitNum = parseInt(limit, 10) || 15;
+      options.limit = limitNum;
+      options.offset = (pageNum - 1) * limitNum;
 
-      // Si no se solicitan eliminados, filtrar novedades eliminadas
-      if (incluirEliminados !== 'true') {
-        reportes = reportes.map(r => {
-          const repObj = r.toObject();
-          repObj.novedades = (repObj.novedades || []).filter(n => !n.eliminado);
-          return repObj;
-        });
-      }
+      const { count, rows } = await Reporte.findAndCountAll(options);
 
       return res.json({
         ok: true,
-        total: reportes.length,
-        reportes
+        total: count,
+        pagina: pageNum,
+        totalPaginas: Math.ceil(count / limitNum),
+        reportes: rows,
       });
     }
 
-    const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 15));
-    const skip = (pageNum - 1) * limitNum;
-
-    let [reportes, total] = await Promise.all([
-      Reporte.find(filtro)
-        .sort({ actualizado_en: -1 })
-        .skip(skip)
-        .limit(limitNum)
-        .select(selectFields),
-      Reporte.countDocuments(filtro)
-    ]);
-
-    if (incluirEliminados !== 'true') {
-      reportes = reportes.map(r => {
-        const repObj = r.toObject();
-        repObj.novedades = (repObj.novedades || []).filter(n => !n.eliminado);
-        return repObj;
-      });
-    }
-
-    const totalPages = Math.ceil(total / limitNum) || 1;
-
-    return res.json({
-      ok: true,
-      total,
-      reportes,
-      data: reportes,
-      paginacion: {
-        total,
-        page: pageNum,
-        limit: limitNum,
-        totalPages,
-        hasNextPage: pageNum < totalPages,
-        hasPrevPage: pageNum > 1
-      }
-    });
+    const reportes = await Reporte.findAll(options);
+    return res.json({ ok: true, total: reportes.length, reportes });
   } catch (error) {
     logger.error(`Error al listar reportes: ${error.message}`, { stack: error.stack });
     return res.status(500).json({ ok: false, mensaje: 'Error al listar reportes', error: error.message });
   }
 };
 
+// Obtener reporte por ID
+exports.obtenerReporte = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const reporte = await Reporte.findByPk(id, {
+      include: [
+        {
+          model: ReporteColaborador,
+          as: 'reporte_colaboradores',
+          include: [{ model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo', 'rol'] }]
+        },
+        {
+          model: Novedad,
+          as: 'novedades',
+          include: [
+            { model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo'] },
+            { model: NovedadFoto, as: 'fotos' }
+          ]
+        }
+      ]
+    });
 
+    if (!reporte) {
+      return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
+    }
+
+    return res.json({ ok: true, reporte });
+  } catch (error) {
+    logger.error(`Error al obtener reporte: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ ok: false, mensaje: 'Error al obtener reporte', error: error.message });
+  }
+};
+
+// Crear reporte
 exports.crearReporte = async (req, res) => {
   try {
+    const usuarioAuth = req.usuario;
     const {
       titulo,
       observaciones_generales,
       numero_rds,
-      fecha_reporte,
+      fecha,
       hora_inicio,
       hora_fin,
       revisado_por,
@@ -142,245 +187,348 @@ exports.crearReporte = async (req, res) => {
       inocar_fecha,
       inocar_pleamar,
       inocar_bajamar,
-      usuario_id,
-      colaborador_id,
-      correo_colaborador,
-      colaborador_correo,
-      colaboradores: colaboradoresEntrantes,
     } = req.body;
-    const usuarioAuth = req.usuario;
 
-    const listaColaboradores = [];
-    const idsAgregados = new Set();
+    const codigo = await generarCodigoReporte();
 
-    // 1. Agregar al usuario creador autenticado
+    let fechaFormateada = new Date().toISOString().split('T')[0];
+    if (fecha) {
+      const parsed = new Date(fecha);
+      if (!isNaN(parsed.getTime())) {
+        fechaFormateada = parsed.toISOString().split('T')[0];
+      }
+    }
+
+    const nuevoReporte = await Reporte.create({
+      codigo,
+      titulo: titulo || 'Reporte de Novedades',
+      observaciones_generales: observaciones_generales || '',
+      numero_rds: numero_rds || 'SEGURA-EP-GASGEC-SS-2026-041 (Lluvias)',
+      fecha: fechaFormateada,
+      hora_inicio: hora_inicio || '06:00',
+      hora_fin: hora_fin || '22:00',
+      revisado_por: revisado_por || 'Jefe de Sala Situacional',
+      cabecera: cabecera || '',
+      periodo: periodo || '',
+      inocar_fecha: inocar_fecha || null,
+      inocar_pleamar: inocar_pleamar || null,
+      inocar_bajamar: inocar_bajamar || null,
+      elaborado_por: usuarioAuth ? (usuarioAuth.nombre || usuarioAuth.correo) : '',
+    });
+
+    // 1. Registrar al creador en la tabla intermedia Reporte_Colaborador
     if (usuarioAuth) {
-      listaColaboradores.push({
-        usuario_id: usuarioAuth._id,
-        nombre: usuarioAuth.nombre || usuarioAuth.correo,
-        correo: usuarioAuth.correo,
+      await ReporteColaborador.create({
+        reporte_id: nuevoReporte.id,
+        usuario_id: usuarioAuth.id,
         primer_aporte: new Date(),
         ultimo_aporte: new Date(),
         total_ediciones: 1,
       });
-      idsAgregados.add(String(usuarioAuth._id));
     }
 
-    const targetUserId = usuario_id || colaborador_id;
-    if (targetUserId && mongoose.Types.ObjectId.isValid(targetUserId)) {
-      const u = await Usuario.findById(targetUserId);
-      if (u && !idsAgregados.has(String(u._id))) {
-        listaColaboradores.push({
-          usuario_id: u._id,
-          nombre: u.nombre || u.correo,
-          correo: u.correo,
-          primer_aporte: new Date(),
-          ultimo_aporte: new Date(),
-          total_ediciones: 1,
-        });
-        idsAgregados.add(String(u._id));
-      }
-    }
-
-    const targetEmail = correo_colaborador || colaborador_correo;
-    if (targetEmail) {
-      const u = await Usuario.findOne({ correo: String(targetEmail).toLowerCase().trim() });
-      if (u && !idsAgregados.has(String(u._id))) {
-        listaColaboradores.push({
-          usuario_id: u._id,
-          nombre: u.nombre || u.correo,
-          correo: u.correo,
-          primer_aporte: new Date(),
-          ultimo_aporte: new Date(),
-          total_ediciones: 1,
-        });
-        idsAgregados.add(String(u._id));
-      }
-    }
-
-    if (Array.isArray(colaboradoresEntrantes)) {
-      for (const item of colaboradoresEntrantes) {
-        const uid = typeof item === 'string' ? item : item?.usuario_id || item?._id;
-        const uEmail = typeof item === 'object' ? item?.correo : null;
-
-        let u = null;
-        if (uid && mongoose.Types.ObjectId.isValid(uid)) {
-          u = await Usuario.findById(uid);
-        } else if (uEmail) {
-          u = await Usuario.findOne({ correo: String(uEmail).toLowerCase().trim() });
-        }
-
-        if (u && !idsAgregados.has(String(u._id))) {
-          listaColaboradores.push({
-            usuario_id: u._id,
-            nombre: u.nombre || u.correo,
-            correo: u.correo,
-            primer_aporte: new Date(),
-            ultimo_aporte: new Date(),
-            total_ediciones: 1,
-          });
-          idsAgregados.add(String(u._id));
-        }
-      }
-    }
-
-    const codigo = await generarCodigoReporte();
-
-    const nuevoReporte = new Reporte({
-      codigo,
-      titulo: titulo || '',
-      observaciones_generales: observaciones_generales || '',
-      numero_rds: numero_rds || '',
-      fecha_reporte: fecha_reporte || new Date().toISOString().split('T')[0],
-      hora_inicio: hora_inicio || '',
-      hora_fin: hora_fin || '',
-      revisado_por: revisado_por || '',
-      cabecera: cabecera || '',
-      periodo: periodo || '',
-      inocar_fecha: inocar_fecha || '',
-      inocar_pleamar: inocar_pleamar || '',
-      inocar_bajamar: inocar_bajamar || '',
-      colaboradores: listaColaboradores,
-      novedades: []
-    });
-
-    await nuevoReporte.save();
-
+    // 2. Registrar en Auditoria
     await Auditoria.create({
-      usuario_id: usuarioAuth._id,
-      usuario_correo: usuarioAuth.correo,
-      reporte_id: nuevoReporte._id,
-      entidad: 'REPORTE',
+      usuario_id: usuarioAuth ? usuarioAuth.id : null,
       accion: 'CREAR',
-      detalles: { codigo: nuevoReporte.codigo, titulo: nuevoReporte.titulo, numero_rds: nuevoReporte.numero_rds },
+      tabla_afectada: 'reporte',
+      registro_id: nuevoReporte.id,
+      detalles: { codigo: nuevoReporte.codigo, titulo: nuevoReporte.titulo },
+      ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1',
     });
 
-    return res.status(201).json({ ok: true, mensaje: 'Reporte creado exitosamente', reporte: nuevoReporte });
+    const reporteCompleto = await Reporte.findByPk(nuevoReporte.id, {
+      include: [
+        {
+          model: ReporteColaborador,
+          as: 'reporte_colaboradores',
+          include: [{ model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo', 'rol'] }]
+        }
+      ]
+    });
+
+    return res.status(201).json({ ok: true, mensaje: 'Reporte creado exitosamente', reporte: reporteCompleto });
   } catch (error) {
+    logger.error(`Error al crear reporte: ${error.message}`, { stack: error.stack });
     return res.status(500).json({ ok: false, mensaje: 'Error al crear reporte', error: error.message });
   }
 };
 
+// Actualizar parámetros institucionales del reporte
 exports.actualizarParametros = async (req, res) => {
   try {
     const { id } = req.params;
-    const usuario = req.usuario;
-    const camposPermitidos = [
-      'titulo', 'observaciones_generales', 'numero_rds', 'fecha_reporte',
+    const usuarioAuth = req.usuario;
+    const reporte = await Reporte.findByPk(id);
+
+    if (!reporte) {
+      return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
+    }
+
+    const campos = [
+      'titulo', 'observaciones_generales', 'numero_rds', 'fecha',
       'hora_inicio', 'hora_fin', 'revisado_por', 'cabecera', 'periodo',
       'inocar_fecha', 'inocar_pleamar', 'inocar_bajamar'
     ];
 
-    const reporte = await Reporte.findById(id);
-    if (!reporte || reporte.eliminado) {
-      return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
-    }
-
-    camposPermitidos.forEach((campo) => {
+    const cambios = {};
+    campos.forEach(campo => {
       if (req.body[campo] !== undefined) {
+        if (campo === 'fecha' && req.body[campo]) {
+          const parsed = new Date(req.body[campo]);
+          if (!isNaN(parsed.getTime())) {
+            reporte[campo] = parsed.toISOString().split('T')[0];
+            cambios[campo] = reporte[campo];
+            return;
+          }
+        }
         reporte[campo] = req.body[campo];
+        cambios[campo] = req.body[campo];
       }
     });
-
-    if (usuario) {
-      const colabIndex = reporte.colaboradores.findIndex(
-        c => String(c.usuario_id) === String(usuario._id)
-      );
-
-      if (colabIndex >= 0) {
-        reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
-        reporte.colaboradores[colabIndex].total_ediciones = (reporte.colaboradores[colabIndex].total_ediciones || 1) + 1;
-      } else {
-        reporte.colaboradores.push({
-          usuario_id: usuario._id,
-          nombre: usuario.nombre || usuario.correo,
-          correo: usuario.correo,
-          primer_aporte: new Date(),
-          ultimo_aporte: new Date(),
-          total_ediciones: 1,
-        });
-      }
-    }
 
     await reporte.save();
 
+    // 1. Actualizar tabla intermedia Reporte_Colaborador y recalculado de elaborado_por
+    if (usuarioAuth) {
+      await registrarColaboracion(reporte.id, usuarioAuth.id);
+    }
+
+    // 2. Registrar en Auditoria
     await Auditoria.create({
-      usuario_id: usuario._id,
-      usuario_correo: usuario.correo,
-      reporte_id: reporte._id,
-      entidad: 'REPORTE',
+      usuario_id: usuarioAuth ? usuarioAuth.id : null,
       accion: 'EDITAR',
-      detalles: { accion: 'ACTUALIZAR_PARAMETROS', camposModificados: Object.keys(req.body) },
+      tabla_afectada: 'reporte',
+      registro_id: reporte.id,
+      detalles: { cambios },
+      ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1',
     });
 
-    return res.json({ ok: true, mensaje: 'Parámetros del reporte actualizados exitosamente', reporte });
+    const reporteActualizado = await Reporte.findByPk(reporte.id, {
+      include: [
+        {
+          model: ReporteColaborador,
+          as: 'reporte_colaboradores',
+          include: [{ model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo', 'rol'] }]
+        }
+      ]
+    });
+
+    return res.json({ ok: true, mensaje: 'Parámetros actualizados exitosamente', reporte: reporteActualizado });
   } catch (error) {
-    return res.status(500).json({ ok: false, mensaje: 'Error al actualizar parámetros', error: error.message });
+    logger.error(`Error al actualizar reporte: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ ok: false, mensaje: 'Error al actualizar reporte', error: error.message });
   }
 };
 
-exports.obtenerReporte = async (req, res) => {
+// Agregar novedad a un reporte específico
+exports.agregarNovedad = async (req, res) => {
   try {
     const { id } = req.params;
-    const { incluirEliminados } = req.query;
-    const reporte = await Reporte.findById(id);
+    const usuario = req.usuario;
+    const datos = req.body;
 
-    if (!reporte || (reporte.eliminado && incluirEliminados !== 'true')) {
+    const reporte = await Reporte.findByPk(id);
+    if (!reporte) {
       return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
     }
 
-    const reporteRes = reporte.toObject();
-    if (incluirEliminados !== 'true') {
-      reporteRes.novedades = (reporteRes.novedades || []).filter(n => !n.eliminado);
+    let parsedDatosAdicionales = datos.datos_adicionales;
+    if (typeof datos.datos_adicionales === 'string') {
+      try { parsedDatosAdicionales = JSON.parse(datos.datos_adicionales); } catch { parsedDatosAdicionales = {}; }
     }
 
-    return res.json({ ok: true, reporte: reporteRes });
+    const nuevaNovedad = await Novedad.create({
+      reporte_id: reporte.id,
+      usuario_id: usuario.id,
+      tipo: datos.tipo || datos.tipo_evento || 'AGUA',
+      direccion: datos.direccion || '',
+      aga: datos.aga || 'A09',
+      instituciones: datos.instituciones || '@emapagye @interagua',
+      fecha: datos.fecha ? new Date(datos.fecha) : new Date(),
+      latitud: datos.latitud !== undefined ? Number(datos.latitud) : -2.1894,
+      longitud: datos.longitud !== undefined ? Number(datos.longitud) : -79.8891,
+      recurso: datos.recurso || datos.recurso_asignado || '',
+      estado: datos.estado || datos.estado_operativo || 'PENDIENTE',
+      descripcion: datos.descripcion || '',
+      acciones: datos.acciones || datos.acciones_inmediatas || '',
+      datos_adicionales: parsedDatosAdicionales || null,
+    });
+
+    if (req.files && req.files.length > 0) {
+      const fotosPromises = req.files.map(f =>
+        NovedadFoto.create({
+          novedad_id: nuevaNovedad.id,
+          url_foto: `/uploads/fotos/${f.filename}`,
+          nombre_archivo: f.originalname,
+        })
+      );
+      await Promise.all(fotosPromises);
+    }
+
+    // 1. Registrar/Actualizar al usuario en la tabla intermedia Reporte_Colaborador
+    await registrarColaboracion(reporte.id, usuario.id);
+
+    // 2. Registrar en Auditoria
+    await Auditoria.create({
+      usuario_id: usuario.id,
+      accion: 'CREAR',
+      tabla_afectada: 'novedad',
+      registro_id: nuevaNovedad.id,
+      detalles: { reporte_id: reporte.id, tipo: nuevaNovedad.tipo, direccion: nuevaNovedad.direccion },
+      ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1',
+    });
+
+    const novedadCompleta = await Novedad.findByPk(nuevaNovedad.id, {
+      include: [
+        { model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo'] },
+        { model: NovedadFoto, as: 'fotos' }
+      ]
+    });
+
+    return res.status(201).json({
+      ok: true,
+      mensaje: 'Novedad agregada exitosamente al reporte',
+      novedad: novedadCompleta,
+    });
   } catch (error) {
-    return res.status(500).json({ ok: false, mensaje: 'Error al obtener reporte', error: error.message });
+    logger.error(`Error al agregar novedad: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ ok: false, mensaje: 'Error al agregar novedad', error: error.message });
   }
 };
 
+// Actualizar novedad de un reporte
+exports.actualizarNovedad = async (req, res) => {
+  try {
+    const { id, novedadId } = req.params;
+    const usuario = req.usuario;
+
+    const novedad = await Novedad.findOne({ where: { id: novedadId, reporte_id: id } });
+    if (!novedad) {
+      return res.status(404).json({ ok: false, mensaje: 'Novedad no encontrada en este reporte' });
+    }
+
+    const campos = ['tipo', 'direccion', 'aga', 'instituciones', 'latitud', 'longitud', 'recurso', 'estado', 'descripcion', 'acciones'];
+    campos.forEach(c => {
+      if (req.body[c] !== undefined) novedad[c] = req.body[c];
+    });
+
+    if (req.body.fecha !== undefined) novedad.fecha = new Date(req.body.fecha);
+
+    if (req.body.datos_adicionales !== undefined) {
+      let parsed = req.body.datos_adicionales;
+      if (typeof parsed === 'string') {
+        try { parsed = JSON.parse(parsed); } catch { parsed = {}; }
+      }
+      novedad.datos_adicionales = parsed;
+    }
+
+    await novedad.save();
+
+    if (req.files && req.files.length > 0) {
+      const fotosPromises = req.files.map(f =>
+        NovedadFoto.create({
+          novedad_id: novedad.id,
+          url_foto: `/uploads/fotos/${f.filename}`,
+          nombre_archivo: f.originalname,
+        })
+      );
+      await Promise.all(fotosPromises);
+    }
+
+    // 1. Actualizar colaboración en Reporte_Colaborador
+    await registrarColaboracion(Number(id), usuario.id);
+
+    // 2. Registrar en Auditoria
+    await Auditoria.create({
+      usuario_id: usuario.id,
+      accion: 'EDITAR',
+      tabla_afectada: 'novedad',
+      registro_id: novedad.id,
+      detalles: { reporte_id: Number(id), estado: novedad.estado },
+      ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1',
+    });
+
+    const novedadActualizada = await Novedad.findByPk(novedad.id, {
+      include: [
+        { model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo'] },
+        { model: NovedadFoto, as: 'fotos' }
+      ]
+    });
+
+    return res.json({
+      ok: true,
+      mensaje: 'Novedad actualizada exitosamente',
+      novedad: novedadActualizada,
+    });
+  } catch (error) {
+    logger.error(`Error al actualizar novedad: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ ok: false, mensaje: 'Error al actualizar novedad', error: error.message });
+  }
+};
+
+// Eliminar novedad de un reporte (Soft Delete)
+exports.eliminarNovedad = async (req, res) => {
+  try {
+    const { id, novedadId } = req.params;
+    const usuario = req.usuario;
+
+    const novedad = await Novedad.findOne({ where: { id: novedadId, reporte_id: id } });
+    if (!novedad) {
+      return res.status(404).json({ ok: false, mensaje: 'Novedad no encontrada en este reporte' });
+    }
+
+    await novedad.destroy();
+
+    // Actualizar colaboración en Reporte_Colaborador
+    await registrarColaboracion(Number(id), usuario.id);
+
+    await Auditoria.create({
+      usuario_id: usuario.id,
+      accion: 'ELIMINAR',
+      tabla_afectada: 'novedad',
+      registro_id: novedadId,
+      detalles: { reporte_id: Number(id), direccion: novedad.direccion },
+      ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1',
+    });
+
+    return res.json({
+      ok: true,
+      mensaje: 'Novedad eliminada exitosamente (soft delete)',
+      novedad_id: Number(novedadId),
+    });
+  } catch (error) {
+    logger.error(`Error al eliminar novedad: ${error.message}`, { stack: error.stack });
+    return res.status(500).json({ ok: false, mensaje: 'Error al eliminar novedad', error: error.message });
+  }
+};
+
+// Eliminar reporte completo (Soft Delete)
 exports.eliminarReporte = async (req, res) => {
   try {
     const { id } = req.params;
     const usuario = req.usuario;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ ok: false, mensaje: 'ID de reporte inválido' });
-    }
-
-    const reporte = await Reporte.findById(id);
-    if (!reporte || reporte.eliminado) {
+    const reporte = await Reporte.findByPk(id);
+    if (!reporte) {
       return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
     }
 
-    const detallesAuditoria = {
-      codigo: reporte.codigo,
-      titulo: reporte.titulo,
-      numero_rds: reporte.numero_rds,
-      total_novedades: reporte.novedades?.filter(n => !n.eliminado).length || 0,
-      total_colaboradores: reporte.colaboradores?.length || 0,
-    };
-
-    // Soft delete: marcar eliminado como true y asignar fecha
-    reporte.eliminado = true;
-    reporte.eliminado_en = new Date();
-    await reporte.save();
+    await reporte.destroy();
 
     await Auditoria.create({
-      usuario_id: usuario?._id,
-      usuario_correo: usuario?.correo || 'sistema',
-      reporte_id: id,
-      entidad: 'REPORTE',
+      usuario_id: usuario.id,
       accion: 'ELIMINAR',
-      detalles: { ...detallesAuditoria, tipo_eliminacion: 'SOFT_DELETE' },
+      tabla_afectada: 'reporte',
+      registro_id: id,
+      detalles: { codigo: reporte.codigo, titulo: reporte.titulo },
+      ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1',
     });
 
     return res.json({
       ok: true,
       mensaje: 'Reporte eliminado exitosamente (soft delete)',
-      id,
-      detalles: detallesAuditoria,
+      id: Number(id),
     });
   } catch (error) {
     logger.error(`Error al eliminar reporte: ${error.message}`, { stack: error.stack });
@@ -388,324 +536,25 @@ exports.eliminarReporte = async (req, res) => {
   }
 };
 
+// Subida independiente de fotos
 exports.subirFotos = async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
-      return res.status(400).json({ ok: false, mensaje: 'No se enviaron archivos de imagen para subir' });
+      return res.status(400).json({ ok: false, mensaje: 'No se enviaron archivos de imagen' });
     }
 
     const host = req.get('host');
     const protocol = req.protocol;
-    const rutasFotos = req.files.map((file) => `/uploads/fotos/${file.filename}`);
-    const urlsCompletas = req.files.map((file) => `${protocol}://${host}/uploads/fotos/${file.filename}`);
+    const rutasFotos = req.files.map(file => `/uploads/fotos/${file.filename}`);
+    const urlsCompletas = req.files.map(file => `${protocol}://${host}/uploads/fotos/${file.filename}`);
 
     return res.status(201).json({
       ok: true,
-      mensaje: `${req.files.length} fotografía(s) guardada(s) exitosamente en el servidor`,
+      mensaje: `${req.files.length} fotografía(s) guardada(s) exitosamente`,
       fotos: rutasFotos,
       urls: urlsCompletas,
     });
   } catch (error) {
-    return res.status(500).json({ ok: false, mensaje: 'Error al procesar la subida de fotografías', error: error.message });
-  }
-};
-
-exports.agregarNovedad = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const usuario = req.usuario;
-    const datosNovedad = req.body;
-
-    const reporte = await Reporte.findById(id);
-    if (!reporte || reporte.eliminado) {
-      return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
-    }
-
-    let fotosArray = [];
-    if (req.files && req.files.length > 0) {
-      fotosArray = req.files.map(f => `/uploads/fotos/${f.filename}`);
-    } else if (Array.isArray(datosNovedad.fotos)) {
-      fotosArray = datosNovedad.fotos;
-    } else if (typeof datosNovedad.fotos === 'string' && datosNovedad.fotos.trim()) {
-      try {
-        fotosArray = JSON.parse(datosNovedad.fotos);
-      } catch {
-        fotosArray = [datosNovedad.fotos];
-      }
-    }
-
-    const nuevaNovedad = {
-      usuario_id: usuario._id,
-      usuario_nombre: usuario.nombre || usuario.correo,
-      tipo_evento: datosNovedad.tipo_evento || 'AGUA',
-      direccion: datosNovedad.direccion || 'Sin direccion',
-      aga: datosNovedad.aga || 'A09',
-      instituciones: datosNovedad.instituciones || '@emapagye @interagua',
-      fecha_evento: datosNovedad.fecha_evento || new Date().toISOString().split('T')[0],
-      hora_evento: datosNovedad.hora_evento || '12:00',
-      latitud: datosNovedad.latitud !== undefined ? Number(datosNovedad.latitud) : -2.1894,
-      longitud: datosNovedad.longitud !== undefined ? Number(datosNovedad.longitud) : -79.8891,
-      recurso_asignado: datosNovedad.recurso_asignado || 'INS-ALC 🚙',
-      estado_operativo: datosNovedad.estado_operativo || '⛔PENDIENTE',
-      descripcion: datosNovedad.descripcion || '',
-      acciones_inmediatas: datosNovedad.acciones_inmediatas || '',
-      fotos: fotosArray,
-      ficha: datosNovedad.ficha || '',
-      camara_cvvc: datosNovedad.camara_cvvc || '',
-      desaparecidos: datosNovedad.desaparecidos || 0,
-      fallecidos: datosNovedad.fallecidos || 0,
-      via_afectada: datosNovedad.via_afectada || 'NO',
-      propiedad_publica: datosNovedad.propiedad_publica || 'NO',
-      propiedad_privada: datosNovedad.propiedad_privada || 'NO',
-      bcbg: datosNovedad.bcbg || '',
-      atm: datosNovedad.atm || '',
-      ia: datosNovedad.ia || '',
-      parques_ep: datosNovedad.parques_ep || '',
-      ooppmm: datosNovedad.ooppmm || '',
-      cnel: datosNovedad.cnel || '',
-      urvaseo: datosNovedad.urvaseo || '',
-      ggrr: datosNovedad.ggrr || '',
-      total_recursos: datosNovedad.total_recursos || 0,
-      num_bcbg: datosNovedad.num_bcbg || 0,
-      num_atm: datosNovedad.num_atm || 0,
-      num_ia: datosNovedad.num_ia || 0,
-      num_parques_ep: datosNovedad.num_parques_ep || 0,
-      num_ooppmm: datosNovedad.num_ooppmm || 0,
-      num_cnel: datosNovedad.num_cnel || 0,
-      num_urvaseo: datosNovedad.num_urvaseo || 0,
-      num_ggrr: datosNovedad.num_ggrr || 0,
-      total_personal: datosNovedad.total_personal || 0,
-      recursos: datosNovedad.recursos || '',
-      hora_en_sitio: datosNovedad.hora_en_sitio || '',
-      tiempo_respuesta: datosNovedad.tiempo_respuesta || '',
-      solucionado: datosNovedad.solucionado || 'EN PROCESO'
-    };
-
-    reporte.novedades.push(nuevaNovedad);
-
-    const colabIndex = reporte.colaboradores.findIndex(c => c.usuario_id.toString() === usuario._id.toString());
-    if (colabIndex >= 0) {
-      reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
-      reporte.colaboradores[colabIndex].total_ediciones += 1;
-    } else {
-      reporte.colaboradores.push({
-        usuario_id: usuario._id,
-        nombre: usuario.nombre || usuario.correo,
-        correo: usuario.correo,
-        primer_aporte: new Date(),
-        ultimo_aporte: new Date(),
-        total_ediciones: 1,
-      });
-    }
-
-    await reporte.save();
-
-    await Auditoria.create({
-      usuario_id: usuario._id,
-      usuario_correo: usuario.correo,
-      reporte_id: reporte._id,
-      entidad: 'NOVEDAD',
-      accion: 'CREAR',
-      detalles: { novedad_direccion: nuevaNovedad.direccion, tipo: nuevaNovedad.tipo_evento, usuario: nuevaNovedad.usuario_nombre, fotos_count: fotosArray.length },
-    });
-
-    const reporteRes = reporte.toObject();
-    reporteRes.novedades = (reporteRes.novedades || []).filter(n => !n.eliminado);
-
-    return res.status(201).json({ ok: true, mensaje: 'Novedad agregada exitosamente', reporte: reporteRes });
-  } catch (error) {
-    return res.status(500).json({ ok: false, mensaje: 'Error al agregar novedad', error: error.message });
-  }
-};
-
-exports.actualizarNovedad = async (req, res) => {
-  try {
-    const { id, novedadId } = req.params;
-    const usuario = req.usuario;
-    const datos = req.body || {};
-
-    const reporte = await Reporte.findById(id);
-    if (!reporte || reporte.eliminado) {
-      return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
-    }
-
-    const novedad = reporte.novedades.id(novedadId);
-    if (!novedad || novedad.eliminado) {
-      return res.status(404).json({ ok: false, mensaje: 'Novedad no encontrada en el reporte' });
-    }
-
-    const camposPermitidos = [
-      'tipo_evento', 'direccion', 'aga', 'instituciones', 'fecha_evento',
-      'hora_evento', 'latitud', 'longitud', 'recurso_asignado', 'estado_operativo',
-      'descripcion', 'acciones_inmediatas', 'ficha', 'camara_cvvc',
-      'desaparecidos', 'fallecidos', 'via_afectada', 'propiedad_publica',
-      'propiedad_privada', 'bcbg', 'atm', 'ia', 'parques_ep', 'ooppmm',
-      'cnel', 'urvaseo', 'ggrr', 'total_recursos', 'num_bcbg', 'num_atm',
-      'num_ia', 'num_parques_ep', 'num_ooppmm', 'num_cnel', 'num_urvaseo',
-      'num_ggrr', 'total_personal', 'recursos', 'hora_en_sitio',
-      'tiempo_respuesta', 'solucionado', 'estado_novedad'
-    ];
-
-    camposPermitidos.forEach(campo => {
-      if (datos[campo] !== undefined) {
-        if (['latitud', 'longitud', 'desaparecidos', 'fallecidos', 'total_recursos', 'num_bcbg', 'num_atm', 'num_ia', 'num_parques_ep', 'num_ooppmm', 'num_cnel', 'num_urvaseo', 'num_ggrr', 'total_personal'].includes(campo)) {
-          novedad[campo] = Number(datos[campo]);
-        } else {
-          novedad[campo] = datos[campo];
-        }
-      }
-    });
-
-    if (req.files && req.files.length > 0) {
-      const nuevasFotos = req.files.map(f => `/uploads/fotos/${f.filename}`);
-      novedad.fotos = novedad.fotos ? novedad.fotos.concat(nuevasFotos) : nuevasFotos;
-    } else if (datos.fotos !== undefined) {
-      if (Array.isArray(datos.fotos)) {
-        novedad.fotos = datos.fotos;
-      } else if (typeof datos.fotos === 'string' && datos.fotos.trim()) {
-        try {
-          novedad.fotos = JSON.parse(datos.fotos);
-        } catch {
-          novedad.fotos = [datos.fotos];
-        }
-      }
-    }
-
-    if (usuario) {
-      const colabIndex = reporte.colaboradores.findIndex(
-        c => String(c.usuario_id) === String(usuario._id)
-      );
-
-      if (colabIndex >= 0) {
-        reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
-        reporte.colaboradores[colabIndex].total_ediciones = (reporte.colaboradores[colabIndex].total_ediciones || 1) + 1;
-      } else {
-        reporte.colaboradores.push({
-          usuario_id: usuario._id,
-          nombre: usuario.nombre || usuario.correo,
-          correo: usuario.correo,
-          primer_aporte: new Date(),
-          ultimo_aporte: new Date(),
-          total_ediciones: 1,
-        });
-      }
-    }
-
-    await reporte.save();
-
-    await Auditoria.create({
-      usuario_id: usuario._id,
-      usuario_correo: usuario.correo,
-      reporte_id: reporte._id,
-      entidad: 'NOVEDAD',
-      accion: 'EDITAR',
-      detalles: { novedad_id: novedad._id, direccion: novedad.direccion, camposModificados: Object.keys(datos) },
-    });
-
-    return res.json({
-      ok: true,
-      mensaje: 'Novedad actualizada exitosamente',
-      novedad,
-      elaborado_por: reporte.elaborado_por,
-      colaboradores: reporte.colaboradores
-    });
-  } catch (error) {
-    return res.status(500).json({ ok: false, mensaje: 'Error al actualizar novedad', error: error.message });
-  }
-};
-
-exports.eliminarNovedad = async (req, res) => {
-  try {
-    const { id, novedadId } = req.params;
-    const usuario = req.usuario;
-
-    const reporte = await Reporte.findById(id);
-    if (!reporte || reporte.eliminado) {
-      return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
-    }
-
-    const novedad = reporte.novedades.id(novedadId);
-    if (!novedad || novedad.eliminado) {
-      return res.status(404).json({ ok: false, mensaje: 'Novedad no encontrada en el reporte' });
-    }
-
-    const direccionEliminada = novedad.direccion;
-    // Soft delete: marcar como eliminada en vez de hacer pull
-    novedad.eliminado = true;
-    novedad.eliminado_en = new Date();
-
-    if (usuario) {
-      const colabIndex = reporte.colaboradores.findIndex(
-        c => String(c.usuario_id) === String(usuario._id)
-      );
-      if (colabIndex >= 0) {
-        reporte.colaboradores[colabIndex].ultimo_aporte = new Date();
-        reporte.colaboradores[colabIndex].total_ediciones = (reporte.colaboradores[colabIndex].total_ediciones || 1) + 1;
-      }
-    }
-
-    await reporte.save();
-
-    await Auditoria.create({
-      usuario_id: usuario._id,
-      usuario_correo: usuario.correo,
-      reporte_id: reporte._id,
-      entidad: 'NOVEDAD',
-      accion: 'ELIMINAR',
-      detalles: { novedad_id: novedadId, direccion: direccionEliminada, tipo_eliminacion: 'SOFT_DELETE' },
-    });
-
-    const novedadesActivas = reporte.novedades.filter(n => !n.eliminado);
-
-    return res.json({
-      ok: true,
-      mensaje: 'Novedad eliminada exitosamente (soft delete)',
-      novedad_id: novedadId,
-      elaborado_por: reporte.elaborado_por,
-      colaboradores: reporte.colaboradores,
-      total_novedades: novedadesActivas.length
-    });
-  } catch (error) {
-    return res.status(500).json({ ok: false, mensaje: 'Error al eliminar novedad', error: error.message });
-  }
-};
-
-exports.exportarAExcel = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const usuario = req.usuario;
-
-    const reporte = await Reporte.findById(id);
-    if (!reporte || reporte.eliminado) {
-      return res.status(404).json({ ok: false, mensaje: 'Reporte no encontrado' });
-    }
-
-    const novedadesActivas = (reporte.novedades || []).filter(n => !n.eliminado);
-    if (novedadesActivas.length === 0) {
-      return res.status(400).json({ ok: false, mensaje: 'El reporte no tiene novedades para registrar en Excel' });
-    }
-
-    const reporteClon = reporte.toObject();
-    reporteClon.novedades = novedadesActivas;
-
-    const resultado = await sharepointService.registrarReporteEnExcel(reporteClon);
-
-    await Auditoria.create({
-      usuario_id: usuario._id,
-      usuario_correo: usuario.correo,
-      reporte_id: reporte._id,
-      entidad: 'REPORTE',
-      accion: 'EDITAR',
-      detalles: { accion: 'EXPORTADO_A_EXCEL_SHAREPOINT', total_filas: novedadesActivas.length }
-    });
-
-    return res.json({
-      ok: true,
-      mensaje: 'Reporte sincronizado con Excel',
-      resultado
-    });
-  } catch (error) {
-    console.error('Error al sincronizar con SharePoint:', error);
-    return res.status(500).json({ ok: false, mensaje: 'Error al sincronizar con SharePoint Excel', error: error.message });
+    return res.status(500).json({ ok: false, mensaje: 'Error al procesar subida de fotos', error: error.message });
   }
 };

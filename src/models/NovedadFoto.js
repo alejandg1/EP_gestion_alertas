@@ -1,48 +1,37 @@
 const { DataTypes, Model } = require('sequelize');
 const { sequelize } = require('../config/database');
 
-class Sesion extends Model { }
+class NovedadFoto extends Model { }
 
-Sesion.init({
+NovedadFoto.init({
   id: {
     type: DataTypes.INTEGER,
     autoIncrement: true,
     primaryKey: true,
   },
-  usuario_id: {
+  novedad_id: {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: 'usuario',
+      model: 'novedad',
       key: 'id',
     },
     onDelete: 'CASCADE',
   },
-  token: {
+  url_foto: {
     type: DataTypes.STRING,
     allowNull: false,
-    unique: true,
   },
-  ip: {
-    type: DataTypes.STRING(45),
-    allowNull: true,
-    defaultValue: '127.0.0.1',
-  },
-  user_agent: {
+  nombre_archivo: {
     type: DataTypes.STRING,
     allowNull: true,
-  },
-  ultimo_acceso: {
-    type: DataTypes.DATE,
-    allowNull: false,
-    defaultValue: DataTypes.NOW,
   },
 }, {
   sequelize,
-  modelName: 'Sesion',
-  tableName: 'sesion',
+  modelName: 'NovedadFoto',
+  tableName: 'novedad_foto',
   paranoid: false,
+  updatedAt: false,
 });
 
-module.exports = Sesion;
-
+module.exports = NovedadFoto;

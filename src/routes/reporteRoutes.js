@@ -287,30 +287,5 @@ router.post('/:id/novedades', protegerRuta, upload.array('fotos', 2), reporteCon
  */
 router.put('/:id/novedades/:novedadId', protegerRuta, upload.array('fotos', 2), reporteController.actualizarNovedad);
 router.delete('/:id/novedades/:novedadId', protegerRuta, reporteController.eliminarNovedad);
-
-/**
- * @openapi
- * /reportes/{id}/exportar-excel:
- *   post:
- *     summary: Registrar y sincronizar novedades del reporte en el Excel de SharePoint (42 columnas)
- *     tags: [Reportes]
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *         description: ID del reporte a exportar
- *     responses:
- *       200:
- *         description: Novedades registradas exitosamente en la tabla de SharePoint
- *       400:
- *         description: El reporte no contiene novedades
- *       404:
- *         description: Reporte no encontrado
- */
-router.post('/:id/exportar-excel', protegerRuta, reporteController.exportarAExcel);
-
 module.exports = router;
+
