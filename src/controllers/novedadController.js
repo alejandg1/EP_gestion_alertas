@@ -69,6 +69,8 @@ exports.listarNovedades = async (req, res) => {
 
     const options = {
       where,
+      distinct: true,
+      col: 'id',
       order: [['fecha', 'DESC'], ['id', 'DESC']],
       include: [
         {
