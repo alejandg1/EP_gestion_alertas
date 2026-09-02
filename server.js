@@ -1,7 +1,16 @@
 require('dotenv').config();
 const http = require('http');
 const express = require('express');
+const Sentry = require('@sentry/node');
 const { Server } = require('socket.io');
+
+if (process.env.BUGSINK_DSN) {
+  Sentry.init({
+    dsn: process.env.BUGSINK_DSN,
+    environment: process.env.NODE_ENV || 'development',
+    tracesSampleRate: 1.0,
+  });
+}
 const cors = require('cors');
 const path = require('path');
 const morgan = require('morgan');
@@ -74,6 +83,27 @@ app.get('/', (req, res) => {
 });
 
 initCollaborationSockets(io);
+
+// Configurar captura de errores de Bugsink / Sentry
+if (process.env.BUGSINK_DSN) {
+  Sentry.setupExpressErrorHandler(app);
+}
+
+// Middleware genérico para errores no capturados
+app.use((err, req, res, next) => {
+  logger.error('Error no controlado en la aplicación:', {
+    message: err.message,
+    stack: err.stack,
+    url: req.originalUrl,
+    method: req.method,
+  });
+  if (!res.headersSent) {
+    res.status(err.status || 500).json({
+      ok: false,
+      mensaje: err.message || 'Error interno del servidor',
+    });
+  }
+});
 
 const PORT = process.env.PORT || 3090;
 const HOST = process.env.HOST || '0.0.0.0';

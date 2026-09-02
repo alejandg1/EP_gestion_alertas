@@ -1,5 +1,30 @@
 const winston = require('winston');
 const path = require('path');
+const Sentry = require('@sentry/node');
+const Transport = require('winston-transport');
+
+class SentryWinstonTransport extends Transport {
+  constructor(opts) {
+    super(opts);
+    this.level = 'error';
+  }
+
+  log(info, callback) {
+    setImmediate(() => this.emit('logged', info));
+    if (process.env.BUGSINK_DSN) {
+      if (info instanceof Error) {
+        Sentry.captureException(info);
+      } else if (info.stack) {
+        const err = new Error(info.message);
+        err.stack = info.stack;
+        Sentry.captureException(err, { extra: info });
+      } else {
+        Sentry.captureMessage(typeof info.message === 'string' ? info.message : JSON.stringify(info), 'error');
+      }
+    }
+    callback();
+  }
+}
 
 const logFormat = winston.format.printf(({ level, message, timestamp, stack, ...meta }) => {
   let log = `${timestamp} [${level.toUpperCase()}]: ${stack || message}`;
@@ -36,7 +61,8 @@ const logger = winston.createLogger({
       filename: path.join(__dirname, '../../logs/combined.log'),
       maxsize: 10485760, // 10MB
       maxFiles: 5,
-    })
+    }),
+    new SentryWinstonTransport()
   ]
 });
 
