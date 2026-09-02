@@ -1,9 +1,9 @@
 const jwt = require('jsonwebtoken');
 const logger = require('../config/logger');
-const { Usuario, Sesion, Auditoria } = require('../models');
+const { sequelize, Usuario, Sesion, Auditoria } = require('../models');
 
 const generarToken = (usuario) => {
-  const secret = process.env.JWT_SECRET || 'fallback_secret_key';
+  const secret = (process.env.JWT_SECRET || 'fallback_secret_key').trim();
   return jwt.sign(
     { id: usuario.id, correo: usuario.correo, nombre: usuario.nombre, rol: usuario.rol },
     secret,
@@ -12,30 +12,33 @@ const generarToken = (usuario) => {
 };
 
 exports.registrar = async (req, res) => {
+  const { correo, password, nombre, rol } = req.body || {};
+  const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
+
+  logger.info(`Intento de registro recibido para correo: ${correo || 'No proporcionado'}`, { ip, body: req.body });
+
+  if (!correo || !password) {
+    logger.warn(`Registro rechazado: campos obligatorios faltantes`, { correo: !!correo, password: !!password });
+    return res.status(400).json({ ok: false, mensaje: 'Correo y contraseña son obligatorios' });
+  }
+
+  const correoNormalizado = correo.toLowerCase().trim();
+  const esDominioValido = correoNormalizado.endsWith('@seguraep.gob.ec') || correoNormalizado.endsWith('@mail.seguraep.gob.ec');
+  if (!esDominioValido) {
+    logger.warn(`Registro rechazado: dominio de correo no permitido`, { correo: correoNormalizado });
+    return res.status(400).json({
+      ok: false,
+      mensaje: 'El correo debe pertenecer al dominio institucional (@seguraep.gob.ec o @mail.seguraep.gob.ec)'
+    });
+  }
+
+  const t = await sequelize.transaction();
+
   try {
-    const { correo, password, nombre, rol } = req.body || {};
-    const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1';
-
-    logger.info(`Intento de registro recibido para correo: ${correo || 'No proporcionado'}`, { ip, body: req.body });
-
-    if (!correo || !password) {
-      logger.warn(`Registro rechazado: campos obligatorios faltantes`, { correo: !!correo, password: !!password });
-      return res.status(400).json({ ok: false, mensaje: 'Correo y contraseña son obligatorios' });
-    }
-
-    const correoNormalizado = correo.toLowerCase().trim();
-    const esDominioValido = correoNormalizado.endsWith('@seguraep.gob.ec') || correoNormalizado.endsWith('@mail.seguraep.gob.ec');
-    if (!esDominioValido) {
-      logger.warn(`Registro rechazado: dominio de correo no permitido`, { correo: correoNormalizado });
-      return res.status(400).json({
-        ok: false,
-        mensaje: 'El correo debe pertenecer al dominio institucional (@seguraep.gob.ec o @mail.seguraep.gob.ec)'
-      });
-    }
-
-    const usuarioExiste = await Usuario.findOne({ where: { correo: correoNormalizado } });
+    const usuarioExiste = await Usuario.findOne({ where: { correo: correoNormalizado }, transaction: t });
 
     if (usuarioExiste) {
+      await t.rollback();
       logger.warn(`Registro rechazado: el correo ya se encuentra registrado`, { correo });
       return res.status(400).json({ ok: false, mensaje: 'El correo ya está registrado' });
     }
@@ -45,15 +48,15 @@ exports.registrar = async (req, res) => {
       password,
       nombre: nombre || correoNormalizado.split('@')[0],
       rol: rol || 'operador',
-    });
+    }, { transaction: t });
 
     const token = generarToken(nuevoUsuario);
-    const sesion = await Sesion.create({
+    await Sesion.create({
       usuario_id: nuevoUsuario.id,
       token,
       ip,
       user_agent: req.headers['user-agent'] || 'Web Client',
-    });
+    }, { transaction: t });
 
     await Auditoria.create({
       usuario_id: nuevoUsuario.id,
@@ -62,7 +65,9 @@ exports.registrar = async (req, res) => {
       registro_id: nuevoUsuario.id,
       detalles: { correo: nuevoUsuario.correo, nombre: nuevoUsuario.nombre },
       ip,
-    });
+    }, { transaction: t });
+
+    await t.commit();
 
     logger.info(`Usuario registrado exitosamente: ${nuevoUsuario.correo}`, { id: nuevoUsuario.id });
     return res.status(201).json({
@@ -77,6 +82,7 @@ exports.registrar = async (req, res) => {
       }
     });
   } catch (error) {
+    await t.rollback();
     logger.error(`Error al registrar usuario: ${error.message}`, { stack: error.stack, body: req.body });
     return res.status(500).json({ ok: false, mensaje: 'Error al registrar usuario', error: error.message });
   }

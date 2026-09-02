@@ -19,7 +19,7 @@ Sesion.init({
     onDelete: 'CASCADE',
   },
   token: {
-    type: DataTypes.STRING,
+    type: DataTypes.TEXT,
     allowNull: false,
     unique: true,
   },
@@ -29,7 +29,7 @@ Sesion.init({
     defaultValue: '127.0.0.1',
   },
   user_agent: {
-    type: DataTypes.STRING,
+    type: DataTypes.TEXT,
     allowNull: true,
   },
   ultimo_acceso: {
