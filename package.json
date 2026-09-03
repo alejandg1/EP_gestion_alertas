@@ -1,6 +1,7 @@
 {
   "scripts": {
     "start": "node server.js",
+    "test": "node --test tests/**/*.test.js",
     "crear-usuario": "node scripts/crearUsuario.js"
   },
   "dependencies": {

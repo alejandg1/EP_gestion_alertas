@@ -38,6 +38,11 @@ exports.listarNovedades = async (req, res) => {
   try {
     const { page, limit, tipo, estado, busqueda, fechaDesde, fechaHasta, soloHistoricos } = req.query;
 
+    logger.info('[NOVEDADES] Solicitud para listar novedades recibida', {
+      usuario: req.usuario ? { id: req.usuario.id, correo: req.usuario.correo, rol: req.usuario.rol } : null,
+      filtros: { page, limit, tipo, estado, busqueda, fechaDesde, fechaHasta, soloHistoricos }
+    });
+
     const where = {};
 
     if (tipo) {
@@ -52,6 +57,7 @@ exports.listarNovedades = async (req, res) => {
       where.reporte_id = null;
     }
 
+    // Eliminación estrictamente lógica (Soft delete usando deletedAt de Sequelize)
     if (busqueda && busqueda.trim()) {
       where[Op.or] = [
         { direccion: { [Op.iLike]: `%${busqueda.trim()}%` } },
@@ -96,6 +102,11 @@ exports.listarNovedades = async (req, res) => {
 
       const { count, rows } = await Novedad.findAndCountAll(options);
 
+      logger.info(`[NOVEDADES] Listado paginado obtenido: ${rows.length} novedades de ${count} totales`, {
+        pagina: pageNum,
+        total: count
+      });
+
       return res.json({
         ok: true,
         total: count,
@@ -106,6 +117,7 @@ exports.listarNovedades = async (req, res) => {
     }
 
     const novedades = await Novedad.findAll(options);
+    logger.info(`[NOVEDADES] Listado completo obtenido: ${novedades.length} novedades`);
     return res.json({
       ok: true,
       total: novedades.length,
@@ -120,6 +132,11 @@ exports.listarNovedades = async (req, res) => {
 exports.obtenerNovedad = async (req, res) => {
   try {
     const { id } = req.params;
+    logger.info(`[NOVEDADES] Solicitud para consultar novedad ID: ${id}`, {
+      novedadId: id,
+      usuario: req.usuario ? { id: req.usuario.id, correo: req.usuario.correo } : null
+    });
+
     const novedad = await Novedad.findByPk(id, {
       include: [
         {
@@ -136,9 +153,11 @@ exports.obtenerNovedad = async (req, res) => {
     });
 
     if (!novedad) {
+      logger.warn(`[NOVEDADES] Novedad no encontrada (ID: ${id})`);
       return res.status(404).json({ ok: false, mensaje: 'Novedad no encontrada' });
     }
 
+    logger.info(`[NOVEDADES] Novedad encontrada con éxito (ID: ${id})`);
     return res.json({ ok: true, novedad });
   } catch (error) {
     logger.error(`Error al obtener novedad: ${error.message}`, { stack: error.stack });
@@ -149,6 +168,19 @@ exports.obtenerNovedad = async (req, res) => {
 exports.crearNovedad = async (req, res) => {
   try {
     const usuario = req.usuario;
+    const archivosAdjuntos = (req.files || []).map(f => ({
+      originalname: f.originalname,
+      filename: f.filename,
+      size: f.size,
+      mimetype: f.mimetype
+    }));
+
+    logger.info('[NOVEDADES] Solicitud para crear novedad recibida en la API', {
+      usuario: usuario ? { id: usuario.id, nombre: usuario.nombre, correo: usuario.correo } : null,
+      bodyRecibido: req.body,
+      archivosRecibidos: archivosAdjuntos
+    });
+
     const {
       tipo,
       direccion,
@@ -173,6 +205,25 @@ exports.crearNovedad = async (req, res) => {
         parsedDatosAdicionales = {};
       }
     }
+    if (!parsedDatosAdicionales || typeof parsedDatosAdicionales !== 'object') {
+      parsedDatosAdicionales = {};
+    }
+
+    if (req.body.recursos_instituciones) {
+      let recInst = req.body.recursos_instituciones;
+      if (typeof recInst === 'string') {
+        try { recInst = JSON.parse(recInst); } catch { }
+      }
+      parsedDatosAdicionales.recursos = recInst;
+    }
+
+    if (req.body.personal_instituciones || req.body.personal) {
+      let persInst = req.body.personal_instituciones || req.body.personal;
+      if (typeof persInst === 'string') {
+        try { persInst = JSON.parse(persInst); } catch { }
+      }
+      parsedDatosAdicionales.personal = persInst;
+    }
 
     const nuevaNovedad = await Novedad.create({
       usuario_id: usuario.id,
@@ -188,10 +239,12 @@ exports.crearNovedad = async (req, res) => {
       estado: estado || 'PENDIENTE',
       descripcion: descripcion || '',
       acciones: acciones || '',
-      datos_adicionales: parsedDatosAdicionales || null,
+      hora_sitio: req.body.hora_sitio || null,
+      solucionado: req.body.solucionado || null,
+      datos_adicionales: Object.keys(parsedDatosAdicionales).length > 0 ? parsedDatosAdicionales : null,
     });
 
-    // Guardar fotos si vienen en multipart/form-data
+    // Guardar fotos si vienen en multipart/form-data o en JSON
     if (req.files && req.files.length > 0) {
       const fotosPromises = req.files.map(f =>
         NovedadFoto.create({
@@ -200,6 +253,17 @@ exports.crearNovedad = async (req, res) => {
           nombre_archivo: f.originalname,
         })
       );
+      await Promise.all(fotosPromises);
+    } else if (req.body.fotos && Array.isArray(req.body.fotos) && req.body.fotos.length > 0) {
+      const fotosPromises = req.body.fotos.map(fotoItem => {
+        const urlStr = typeof fotoItem === 'string' ? fotoItem : (fotoItem.url_foto || fotoItem.url || fotoItem.path || '');
+        if (!urlStr) return null;
+        return NovedadFoto.create({
+          novedad_id: nuevaNovedad.id,
+          url_foto: urlStr,
+          nombre_archivo: urlStr.split('/').pop() || 'foto.jpg',
+        });
+      }).filter(Boolean);
       await Promise.all(fotosPromises);
     }
 
@@ -220,12 +284,19 @@ exports.crearNovedad = async (req, res) => {
       ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1',
     });
 
-
     const novedadCompleta = await Novedad.findByPk(nuevaNovedad.id, {
       include: [
         { model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo', 'rol'] },
         { model: NovedadFoto, as: 'fotos' }
       ]
+    });
+
+    logger.info(`[NOVEDADES] Novedad creada exitosamente con ID: ${nuevaNovedad.id}`, {
+      novedadId: nuevaNovedad.id,
+      tipo: nuevaNovedad.tipo,
+      direccion: nuevaNovedad.direccion,
+      reporteId: nuevaNovedad.reporte_id,
+      estado: nuevaNovedad.estado
     });
 
     return res.status(201).json({
@@ -234,7 +305,7 @@ exports.crearNovedad = async (req, res) => {
       novedad: novedadCompleta,
     });
   } catch (error) {
-    logger.error(`Error al crear novedad: ${error.message}`, { stack: error.stack });
+    logger.error(`Error al crear novedad: ${error.message}`, { stack: error.stack, body: req.body });
     return res.status(500).json({ ok: false, mensaje: 'Error al crear novedad', error: error.message });
   }
 };
@@ -243,9 +314,25 @@ exports.actualizarNovedad = async (req, res) => {
   try {
     const { id } = req.params;
     const usuario = req.usuario;
+
+    const archivosAdjuntos = (req.files || []).map(f => ({
+      originalname: f.originalname,
+      filename: f.filename,
+      size: f.size,
+      mimetype: f.mimetype
+    }));
+
+    logger.info(`[NOVEDADES] Solicitud para actualizar novedad ID: ${id} recibida en la API`, {
+      novedadId: id,
+      usuario: usuario ? { id: usuario.id, nombre: usuario.nombre, correo: usuario.correo } : null,
+      bodyRecibido: req.body,
+      archivosRecibidos: archivosAdjuntos
+    });
+
     const novedad = await Novedad.findByPk(id);
 
     if (!novedad) {
+      logger.warn(`[NOVEDADES] Intento de actualizar novedad inexistente (ID: ${id})`);
       return res.status(404).json({ ok: false, mensaje: 'Novedad no encontrada' });
     }
 
@@ -261,7 +348,10 @@ exports.actualizarNovedad = async (req, res) => {
       estado,
       descripcion,
       acciones,
+      hora_sitio,
+      solucionado,
       datos_adicionales,
+      recursos_instituciones,
       reporte_id
     } = req.body;
 
@@ -276,15 +366,37 @@ exports.actualizarNovedad = async (req, res) => {
     if (estado !== undefined) novedad.estado = estado;
     if (descripcion !== undefined) novedad.descripcion = descripcion;
     if (acciones !== undefined) novedad.acciones = acciones;
+    if (hora_sitio !== undefined) novedad.hora_sitio = hora_sitio;
+    if (solucionado !== undefined) novedad.solucionado = solucionado;
     if (reporte_id !== undefined) novedad.reporte_id = reporte_id;
 
+    let currentDatos = novedad.datos_adicionales ? JSON.parse(JSON.stringify(novedad.datos_adicionales)) : {};
     if (datos_adicionales !== undefined) {
       let parsed = datos_adicionales;
       if (typeof datos_adicionales === 'string') {
         try { parsed = JSON.parse(datos_adicionales); } catch { parsed = {}; }
       }
-      novedad.datos_adicionales = parsed;
+      currentDatos = { ...currentDatos, ...parsed };
     }
+
+    if (recursos_instituciones !== undefined) {
+      let recInst = recursos_instituciones;
+      if (typeof recInst === 'string') {
+        try { recInst = JSON.parse(recInst); } catch { }
+      }
+      currentDatos.recursos = recInst;
+    }
+
+    if (req.body.personal_instituciones !== undefined || req.body.personal !== undefined) {
+      let persInst = req.body.personal_instituciones !== undefined ? req.body.personal_instituciones : req.body.personal;
+      if (typeof persInst === 'string') {
+        try { persInst = JSON.parse(persInst); } catch { }
+      }
+      currentDatos.personal = persInst;
+    }
+
+    novedad.set('datos_adicionales', currentDatos);
+    novedad.changed('datos_adicionales', true);
 
     await novedad.save();
 
@@ -296,6 +408,18 @@ exports.actualizarNovedad = async (req, res) => {
           nombre_archivo: f.originalname,
         })
       );
+      await Promise.all(fotosPromises);
+    } else if (req.body.fotos !== undefined && Array.isArray(req.body.fotos)) {
+      await NovedadFoto.destroy({ where: { novedad_id: novedad.id } });
+      const fotosPromises = req.body.fotos.map(fotoItem => {
+        const urlStr = typeof fotoItem === 'string' ? fotoItem : (fotoItem.url_foto || fotoItem.url || fotoItem.path || '');
+        if (!urlStr) return null;
+        return NovedadFoto.create({
+          novedad_id: novedad.id,
+          url_foto: urlStr,
+          nombre_archivo: urlStr.split('/').pop() || 'foto.jpg',
+        });
+      }).filter(Boolean);
       await Promise.all(fotosPromises);
     }
 
@@ -317,12 +441,18 @@ exports.actualizarNovedad = async (req, res) => {
       ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1',
     });
 
-
     const novedadActualizada = await Novedad.findByPk(novedad.id, {
       include: [
         { model: Usuario, as: 'usuario', attributes: ['id', 'nombre', 'correo', 'rol'] },
         { model: NovedadFoto, as: 'fotos' }
       ]
+    });
+
+    logger.info(`[NOVEDADES] Novedad ID: ${id} actualizada exitosamente`, {
+      novedadId: id,
+      estado: novedad.estado,
+      tipo: novedad.tipo,
+      direccion: novedad.direccion
     });
 
     return res.json({
@@ -331,7 +461,7 @@ exports.actualizarNovedad = async (req, res) => {
       novedad: novedadActualizada,
     });
   } catch (error) {
-    logger.error(`Error al actualizar novedad: ${error.message}`, { stack: error.stack });
+    logger.error(`Error al actualizar novedad: ${error.message}`, { stack: error.stack, novedadId: req.params.id, body: req.body });
     return res.status(500).json({ ok: false, mensaje: 'Error al actualizar novedad', error: error.message });
   }
 };
@@ -341,8 +471,14 @@ exports.eliminarNovedad = async (req, res) => {
     const { id } = req.params;
     const usuario = req.usuario;
 
+    logger.info(`[NOVEDADES] Solicitud para eliminar novedad ID: ${id} recibida en la API`, {
+      novedadId: id,
+      usuario: usuario ? { id: usuario.id, nombre: usuario.nombre, correo: usuario.correo } : null
+    });
+
     const novedad = await Novedad.findByPk(id);
     if (!novedad) {
+      logger.warn(`[NOVEDADES] Intento de eliminar novedad inexistente (ID: ${id})`);
       return res.status(404).json({ ok: false, mensaje: 'Novedad no encontrada' });
     }
 
@@ -357,13 +493,60 @@ exports.eliminarNovedad = async (req, res) => {
       ip: req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '127.0.0.1',
     });
 
+    logger.info(`[NOVEDADES] Novedad ID: ${id} eliminada exitosamente (soft delete)`, { novedadId: id });
+
     return res.json({
       ok: true,
       mensaje: 'Novedad eliminada exitosamente (soft delete)',
       id: Number(id),
     });
   } catch (error) {
-    logger.error(`Error al eliminar novedad: ${error.message}`, { stack: error.stack });
+    logger.error(`Error al eliminar novedad: ${error.message}`, { stack: error.stack, novedadId: req.params.id });
     return res.status(500).json({ ok: false, mensaje: 'Error al eliminar novedad', error: error.message });
+  }
+};
+
+/**
+ * Obtener métricas y KPIs de tiempos de respuesta globales o por filtros
+ */
+exports.obtenerMetricasTiempos = async (req, res) => {
+  try {
+    const { fechaDesde, fechaHasta, tipo, aga, reporte_id } = req.query;
+
+    logger.info('[NOVEDADES] Solicitud de métricas de tiempos recibida', {
+      filtros: { fechaDesde, fechaHasta, tipo, aga, reporte_id },
+      usuario: req.usuario ? { id: req.usuario.id, correo: req.usuario.correo } : null
+    });
+
+    const where = {};
+
+    if (tipo) where.tipo = tipo;
+    if (aga) where.aga = aga;
+    if (reporte_id) where.reporte_id = reporte_id;
+
+    if (fechaDesde || fechaHasta) {
+      where.fecha = {};
+      if (fechaDesde) where.fecha[Op.gte] = new Date(fechaDesde);
+      if (fechaHasta) where.fecha[Op.lte] = new Date(fechaHasta);
+    }
+
+    const { generarMetricasTiempos } = require('../services/calculosOperativosService');
+    const novedades = await Novedad.findAll({
+      where,
+      attributes: ['id', 'tipo', 'aga', 'fecha', 'hora_sitio', 'tiempo_respuesta', 'solucionado', 'tiempo_atencion', 'datos_adicionales'],
+    });
+
+    const metricas = generarMetricasTiempos(novedades);
+
+    logger.info(`[NOVEDADES] Métricas de tiempos generadas exitosamente para ${novedades.length} novedades`);
+
+    return res.json({
+      ok: true,
+      total_analizados: novedades.length,
+      metricas,
+    });
+  } catch (error) {
+    logger.error(`Error al obtener métricas de tiempos: ${error.message}`, { stack: error.stack, query: req.query });
+    return res.status(500).json({ ok: false, mensaje: 'Error al calcular métricas de tiempos', error: error.message });
   }
 };

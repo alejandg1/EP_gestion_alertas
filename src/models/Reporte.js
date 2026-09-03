@@ -14,6 +14,11 @@ Reporte.init({
     allowNull: false,
     unique: true,
   },
+  tipo_reporte: {
+    type: DataTypes.ENUM('epoca_lluvias', 'epoca_seca'),
+    allowNull: false,
+    defaultValue: 'epoca_lluvias',
+  },
   titulo: {
     type: DataTypes.STRING,
     allowNull: true,
@@ -60,6 +65,10 @@ Reporte.init({
   },
   elaborado_por: {
     type: DataTypes.STRING,
+    allowNull: true,
+  },
+  tiempo_respuesta_promedio: {
+    type: DataTypes.INTEGER,
     allowNull: true,
   },
   observaciones_generales: {

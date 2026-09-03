@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { Reporte, ReporteColaborador, Novedad, NovedadFoto, Usuario, Auditoria } = require('../models');
+const logger = require('../config/logger');
 
 const locksPorReporte = new Map();
 const usuariosEnReporte = new Map();
@@ -95,12 +96,15 @@ const serializarReporteParaSocket = async (reporteId) => {
     latitud: nov.latitud,
     longitud: nov.longitud,
     recurso: nov.recurso,
-    recurso_asignado: nov.recurso,
     estado: nov.estado,
     estado_operativo: nov.estado,
     descripcion: nov.descripcion,
     acciones: nov.acciones,
     acciones_inmediatas: nov.acciones,
+    hora_sitio: nov.hora_sitio || '',
+    tiempo_respuesta: nov.tiempo_respuesta,
+    solucionado: nov.solucionado || '',
+    tiempo_atencion: nov.tiempo_atencion,
     fotos: (nov.fotos || []).map(f => f.url_foto),
     datos_adicionales: nov.datos_adicionales,
     created_at: nov.created_at,
@@ -149,10 +153,14 @@ function initCollaborationSockets(io) {
   io.on('connection', (socket) => {
     const usuario = socket.usuario;
 
+    logger.info(`[SOCKET] Conexión WebSocket establecida para usuario: ${usuario?.correo || 'desconocido'} (ID: ${usuario?.id}, SocketID: ${socket.id})`);
+
     // 1. UNIRSE A LA SALA DE UN REPORTE
     socket.on('unirse_reporte', async ({ reporteId }) => {
       try {
         const idNum = Number(reporteId);
+        logger.info(`[SOCKET] Usuario ${usuario?.correo} (ID: ${usuario?.id}) solicitó unirse al reporte ID: ${reporteId}`);
+
         if (!idNum) return;
 
         socket.join(`reporte_${idNum}`);
@@ -173,6 +181,7 @@ function initCollaborationSockets(io) {
 
         const reporteRes = await serializarReporteParaSocket(idNum);
         if (!reporteRes) {
+          logger.warn(`[SOCKET] Reporte no encontrado al intentar unirse (ID: ${idNum})`);
           socket.emit('error_socket', { mensaje: 'Reporte no encontrado o eliminado' });
           return;
         }
@@ -187,6 +196,7 @@ function initCollaborationSockets(io) {
           usuariosActivos: Array.from(usuariosEnReporte.get(idNum).values()),
         });
       } catch (error) {
+        logger.error(`[SOCKET] Error al unirse al reporte ID: ${reporteId}: ${error.message}`, { stack: error.stack });
         socket.emit('error_socket', { mensaje: 'Error al unirse al reporte', error: error.message });
       }
     });
@@ -194,12 +204,15 @@ function initCollaborationSockets(io) {
     // 2. CONTROL DE LOCKS CONCURRENTES
     socket.on('lock_campo', ({ reporteId, campoKey }) => {
       const idNum = Number(reporteId);
+      logger.info(`[SOCKET] Intento de bloqueo de campo "${campoKey}" en reporte ID: ${reporteId} por usuario: ${usuario?.correo}`);
+
       if (!locksPorReporte.has(idNum)) {
         locksPorReporte.set(idNum, {});
       }
       const locks = locksPorReporte.get(idNum);
 
       if (locks[campoKey] && locks[campoKey].usuarioId !== usuario.id) {
+        logger.info(`[SOCKET] Bloqueo denegado en campo "${campoKey}" de reporte ID: ${reporteId} (ya bloqueado por ${locks[campoKey].usuarioNombre})`);
         socket.emit('lock_denegado', {
           campoKey,
           bloqueadoPor: locks[campoKey].usuarioNombre,
@@ -223,6 +236,7 @@ function initCollaborationSockets(io) {
 
     socket.on('unlock_campo', ({ reporteId, campoKey }) => {
       const idNum = Number(reporteId);
+      logger.info(`[SOCKET] Desbloqueo de campo "${campoKey}" en reporte ID: ${reporteId} por usuario: ${usuario?.correo}`);
       const locks = locksPorReporte.get(idNum);
       if (locks && locks[campoKey] && locks[campoKey].usuarioId === usuario.id) {
         delete locks[campoKey];
@@ -234,8 +248,16 @@ function initCollaborationSockets(io) {
     socket.on('agregar_novedad', async ({ reporteId, novedad }) => {
       try {
         const idNum = Number(reporteId);
+        logger.info(`[SOCKET] Recepción de solicitud para agregar novedad en reporte ID: ${reporteId} vía socket`, {
+          usuario: usuario ? { id: usuario.id, correo: usuario.correo } : null,
+          novedadRecibida: novedad
+        });
+
         const reporte = await Reporte.findByPk(idNum);
-        if (!reporte) return;
+        if (!reporte) {
+          logger.warn(`[SOCKET] Reporte no encontrado para agregar novedad vía socket (ID: ${idNum})`);
+          return;
+        }
 
         let parsedDatosAdicionales = novedad.datos_adicionales;
         if (typeof novedad.datos_adicionales === 'string') {
@@ -299,11 +321,17 @@ function initCollaborationSockets(io) {
           descripcion: nuevaNovedad.descripcion,
           acciones: nuevaNovedad.acciones,
           acciones_inmediatas: nuevaNovedad.acciones,
+          hora_sitio: nuevaNovedad.hora_sitio || '',
+          tiempo_respuesta: nuevaNovedad.tiempo_respuesta,
+          solucionado: nuevaNovedad.solucionado || '',
+          tiempo_atencion: nuevaNovedad.tiempo_atencion,
           fotos: Array.isArray(novedad.fotos) ? novedad.fotos : [],
           datos_adicionales: nuevaNovedad.datos_adicionales,
           created_at: nuevaNovedad.created_at,
           updated_at: nuevaNovedad.updated_at,
         };
+
+        logger.info(`[SOCKET] Novedad agregada exitosamente vía socket al reporte ID: ${idNum} (ID Novedad: ${nuevaNovedad.id})`);
 
         io.to(`reporte_${idNum}`).emit('novedad_agregada', {
           novedad: novedadRes,
@@ -311,6 +339,7 @@ function initCollaborationSockets(io) {
           elaborado_por: elaboradoPor,
         });
       } catch (err) {
+        logger.error(`[SOCKET] Error al agregar novedad vía socket: ${err.message}`, { stack: err.stack, reporteId });
         socket.emit('error_socket', { mensaje: 'Error al agregar novedad vía socket', error: err.message });
       }
     });
@@ -319,8 +348,16 @@ function initCollaborationSockets(io) {
     socket.on('actualizar_parametros', async ({ reporteId, parametros }) => {
       try {
         const idNum = Number(reporteId);
+        logger.info(`[SOCKET] Recepción de actualización de parámetros en reporte ID: ${reporteId} vía socket`, {
+          usuario: usuario ? { id: usuario.id, correo: usuario.correo } : null,
+          parametrosRecibidos: parametros
+        });
+
         const reporte = await Reporte.findByPk(idNum);
-        if (!reporte) return;
+        if (!reporte) {
+          logger.warn(`[SOCKET] Reporte no encontrado para actualizar parámetros vía socket (ID: ${idNum})`);
+          return;
+        }
 
         const campos = [
           'titulo', 'observaciones_generales', 'numero_rds', 'fecha',
@@ -347,6 +384,8 @@ function initCollaborationSockets(io) {
           detalles: { parametros },
         });
 
+        logger.info(`[SOCKET] Parámetros de reporte ID: ${idNum} actualizados exitosamente vía socket`);
+
         io.to(`reporte_${idNum}`).emit('parametros_actualizados', {
           reporteId: idNum,
           parametros: {
@@ -358,6 +397,7 @@ function initCollaborationSockets(io) {
           actualizadoPor: usuario.nombre || usuario.correo,
         });
       } catch (err) {
+        logger.error(`[SOCKET] Error al actualizar parámetros vía socket: ${err.message}`, { stack: err.stack, reporteId });
         socket.emit('error_socket', { mensaje: 'Error al actualizar parámetros', error: err.message });
       }
     });
@@ -368,8 +408,16 @@ function initCollaborationSockets(io) {
         const idNum = Number(reporteId);
         const novIdNum = Number(novedadId);
 
+        logger.info(`[SOCKET] Recepción de actualización de novedad ID: ${novedadId} en reporte ID: ${reporteId} vía socket`, {
+          usuario: usuario ? { id: usuario.id, correo: usuario.correo } : null,
+          cambiosRecibidos: cambios
+        });
+
         const novedad = await Novedad.findOne({ where: { id: novIdNum, reporte_id: idNum } });
-        if (!novedad) return;
+        if (!novedad) {
+          logger.warn(`[SOCKET] Novedad no encontrada para actualizar vía socket (ID Novedad: ${novIdNum}, ID Reporte: ${idNum})`);
+          return;
+        }
 
         const campos = ['tipo', 'direccion', 'aga', 'instituciones', 'latitud', 'longitud', 'recurso', 'estado', 'descripcion', 'acciones'];
         campos.forEach(c => {
@@ -420,8 +468,14 @@ function initCollaborationSockets(io) {
           descripcion: novedad.descripcion,
           acciones: novedad.acciones,
           acciones_inmediatas: novedad.acciones,
+          hora_sitio: novedad.hora_sitio || '',
+          tiempo_respuesta: novedad.tiempo_respuesta,
+          solucionado: novedad.solucionado || '',
+          tiempo_atencion: novedad.tiempo_atencion,
           datos_adicionales: novedad.datos_adicionales,
         };
+
+        logger.info(`[SOCKET] Novedad ID: ${novIdNum} en reporte ID: ${idNum} actualizada exitosamente vía socket`);
 
         io.to(`reporte_${idNum}`).emit('novedad_actualizada', {
           novedad: novedadRes,
@@ -430,6 +484,7 @@ function initCollaborationSockets(io) {
           actualizadoPor: usuario.nombre || usuario.correo,
         });
       } catch (err) {
+        logger.error(`[SOCKET] Error al actualizar novedad vía socket: ${err.message}`, { stack: err.stack, reporteId, novedadId });
         socket.emit('error_socket', { mensaje: 'Error al actualizar novedad vía socket', error: err.message });
       }
     });
@@ -440,8 +495,15 @@ function initCollaborationSockets(io) {
         const idNum = Number(reporteId);
         const novIdNum = Number(novedadId);
 
+        logger.info(`[SOCKET] Recepción de eliminación de novedad ID: ${novedadId} en reporte ID: ${reporteId} vía socket`, {
+          usuario: usuario ? { id: usuario.id, correo: usuario.correo } : null
+        });
+
         const novedad = await Novedad.findOne({ where: { id: novIdNum, reporte_id: idNum } });
-        if (!novedad) return;
+        if (!novedad) {
+          logger.warn(`[SOCKET] Novedad no encontrada para eliminar vía socket (ID Novedad: ${novIdNum}, ID Reporte: ${idNum})`);
+          return;
+        }
 
         await novedad.destroy(); // Soft delete
         const { colaboradores, elaboradoPor } = await registrarColaboracionSocket(idNum, usuario.id);
@@ -454,6 +516,8 @@ function initCollaborationSockets(io) {
           detalles: { reporte_id: idNum, direccion: novedad.direccion },
         });
 
+        logger.info(`[SOCKET] Novedad ID: ${novIdNum} eliminada exitosamente del reporte ID: ${idNum} vía socket`);
+
         io.to(`reporte_${idNum}`).emit('novedad_eliminada', {
           novedadId: novIdNum,
           colaboradores,
@@ -461,6 +525,7 @@ function initCollaborationSockets(io) {
           eliminadoPor: usuario.nombre || usuario.correo,
         });
       } catch (err) {
+        logger.error(`[SOCKET] Error al eliminar novedad vía socket: ${err.message}`, { stack: err.stack, reporteId, novedadId });
         socket.emit('error_socket', { mensaje: 'Error al eliminar novedad vía socket', error: err.message });
       }
     });
@@ -469,8 +534,16 @@ function initCollaborationSockets(io) {
     socket.on('eliminar_reporte', async ({ reporteId }) => {
       try {
         const idNum = Number(reporteId);
+
+        logger.info(`[SOCKET] Recepción de eliminación de reporte ID: ${reporteId} vía socket`, {
+          usuario: usuario ? { id: usuario.id, correo: usuario.correo } : null
+        });
+
         const reporte = await Reporte.findByPk(idNum);
-        if (!reporte) return;
+        if (!reporte) {
+          logger.warn(`[SOCKET] Reporte no encontrado para eliminar vía socket (ID: ${idNum})`);
+          return;
+        }
 
         await reporte.destroy(); // Soft delete
 
@@ -482,6 +555,8 @@ function initCollaborationSockets(io) {
           detalles: { codigo: reporte.codigo, titulo: reporte.titulo },
         });
 
+        logger.info(`[SOCKET] Reporte ID: ${idNum} eliminado exitosamente vía socket`);
+
         io.to(`reporte_${idNum}`).emit('reporte_eliminado', {
           reporteId: idNum,
           eliminadoPor: usuario.nombre || usuario.correo,
@@ -490,12 +565,14 @@ function initCollaborationSockets(io) {
         locksPorReporte.delete(idNum);
         usuariosEnReporte.delete(idNum);
       } catch (err) {
+        logger.error(`[SOCKET] Error al eliminar reporte vía socket: ${err.message}`, { stack: err.stack, reporteId });
         socket.emit('error_socket', { mensaje: 'Error al eliminar reporte vía socket', error: err.message });
       }
     });
 
     // 8. DESCONEXIÓN DE USUARIO
     socket.on('disconnect', () => {
+      logger.info(`[SOCKET] Desconexión de WebSocket: usuario ${usuario?.correo || 'desconocido'} (SocketID: ${socket.id})`);
       const reporteId = socket.reporteActual;
       if (reporteId && usuariosEnReporte.has(reporteId)) {
         usuariosEnReporte.get(reporteId).delete(socket.id);

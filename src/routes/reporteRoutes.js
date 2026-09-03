@@ -287,5 +287,29 @@ router.post('/:id/novedades', protegerRuta, upload.array('fotos', 2), reporteCon
  */
 router.put('/:id/novedades/:novedadId', protegerRuta, upload.array('fotos', 2), reporteController.actualizarNovedad);
 router.delete('/:id/novedades/:novedadId', protegerRuta, reporteController.eliminarNovedad);
+
+/**
+ * @openapi
+ * /reportes/{id}/metricas-tiempos:
+ *   get:
+ *     summary: Obtener analítica de tiempos de respuesta y personal por institución para este reporte
+ *     tags: [Reportes]
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID numérico del reporte
+ *     responses:
+ *       200:
+ *         description: Métricas agregadas de tiempos de respuesta del reporte
+ *       404:
+ *         description: Reporte no encontrado
+ */
+router.get('/:id/metricas-tiempos', protegerRuta, reporteController.obtenerMetricasTiemposReporte);
+
 module.exports = router;
 

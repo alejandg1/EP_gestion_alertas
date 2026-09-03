@@ -21,6 +21,7 @@ const { connectDB, sequelize } = require('./src/config/database');
 const { Usuario, Reporte, Novedad, NovedadFoto, Sesion, Auditoria } = require('./src/models');
 const swaggerSpec = require('./src/config/swagger');
 const authRoutes = require('./src/routes/authRoutes');
+const usuarioRoutes = require('./src/routes/usuarioRoutes');
 const reporteRoutes = require('./src/routes/reporteRoutes');
 const novedadRoutes = require('./src/routes/novedadRoutes');
 const initCollaborationSockets = require('./src/sockets/collaborationSocket');
@@ -68,8 +69,47 @@ app.get('/docs.json', (req, res) => {
 });
 
 app.use('/auth', authRoutes);
+app.use('/usuarios', usuarioRoutes);
 app.use('/reportes', reporteRoutes);
 app.use('/novedades', novedadRoutes);
+
+app.get('/camaras', async (req, res) => {
+  const apiUrl = process.env.CAMERAS_API || process.env.VITE_CAMERAS_API;
+  if (!apiUrl) {
+    return res.status(404).json({ ok: false, mensaje: 'CAMERAS_API no configurada en el servidor' });
+  }
+  try {
+    const axios = require('axios');
+    const response = await axios.get(apiUrl, { timeout: 10000 });
+    return res.json(response.data);
+  } catch (error) {
+    logger.error('Error al consultar CAMERAS_API desde backend:', error.message);
+    return res.status(502).json({ ok: false, mensaje: 'Error al consultar API externa de cámaras', error: error.message });
+  }
+});
+
+app.post('/camaras/snapshot', async (req, res) => {
+  const { rtsp, url } = req.body || {};
+  const axios = require('axios');
+  
+  if (rtsp && rtsp.startsWith('rtsp://')) {
+    const httpUrls = [
+      rtsp.replace('rtsp://', 'http://') + '/snapshot',
+      rtsp.replace('rtsp://', 'http://') + '/jpeg',
+      rtsp.replace('rtsp://', 'http://') + '/image'
+    ];
+
+    for (const testUrl of httpUrls) {
+      try {
+        const response = await axios.get(testUrl, { responseType: 'arraybuffer', timeout: 3000 });
+        res.set('Content-Type', 'image/jpeg');
+        return res.send(response.data);
+      } catch {}
+    }
+  }
+
+  return res.status(404).json({ ok: false, mensaje: 'Snapshot directo no disponible' });
+});
 
 app.get('/', (req, res) => {
   res.json({
