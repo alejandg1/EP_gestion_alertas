@@ -73,14 +73,23 @@ app.use('/usuarios', usuarioRoutes);
 app.use('/reportes', reporteRoutes);
 app.use('/novedades', novedadRoutes);
 
+/**
+ * @openapi
+ * /:
+ *   get:
+ *     summary: Estado del servicio y enlaces a la documentación OpenAPI
+ *     tags: [Sistema]
+ *     responses:
+ *       200:
+ *         description: Estado del servidor y URLs de documentación
+ */
 app.get('/', (req, res) => {
   res.json({
     ok: true,
-    servicio: 'Sistema de Gestión de Alertas y Novedades - Sala Situacional',
-    bd: 'PostgreSQL',
+    servicio: 'Sistema integra de reportes de emergencias',
     timestamp: new Date().toISOString(),
-    docs: `http://localhost:${process.env.PORT || 3090}/docs`,
-    openapi_json: `http://localhost:${process.env.PORT || 3090}/docs.json`,
+    docs: `http://10.10.80.70:${process.env.PORT || 3090}/docs`,
+    openapi_json: `http://10.10.80.70:${process.env.PORT || 3090}/docs.json`,
   });
 });
 
@@ -111,8 +120,8 @@ const PORT = process.env.PORT || 3090;
 const HOST = process.env.HOST || '0.0.0.0';
 server.listen(PORT, HOST, () => {
   logger.info(`Servidor ejecutandose en http://${HOST}:${PORT}`);
-  logger.info(`Documentacion OpenAPI Swagger UI: http://localhost:${PORT}/docs`);
-  logger.info(`Especificacion OpenAPI JSON (Postman/Insomnia): http://localhost:${PORT}/docs.json`);
+  logger.info(`Documentacion OpenAPI Swagger UI: http://10.10.80.70:${PORT}/docs`);
+  logger.info(`Especificacion OpenAPI JSON (Postman/Insomnia): http://10.10.80.70:${PORT}/docs.json`);
 });
 
 

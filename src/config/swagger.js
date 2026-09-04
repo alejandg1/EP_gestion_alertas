@@ -36,14 +36,14 @@ const socket = io('http://localhost:3090', {
 
 | Evento | Payload JSON | Descripcion |
 | :--- | :--- | :--- |
-| **\`unirse_reporte\`** | \`{ "reporteId": "string" }\` | Se une a la sala del reporte y solicita el estado actual con sus locks. |
-| **\`lock_campo\`** | \`{ "reporteId": "string", "campoKey": "string" }\` | Notifica que el operador comenzo a editar un campo general (ej: \`numero_rds\`, \`inocar_pleamar\`). |
-| **\`unlock_campo\`** | \`{ "reporteId": "string", "campoKey": "string" }\` | Libera el candado del campo al terminar la edicion (\`blur\`). |
-| **\`actualizar_parametros\`** | \`{ "reporteId": "string", "parametros": { ... } }\` | Guarda y sincroniza cambios en los campos generales (RDS, INOCAR, horas de corte). |
-| **\`agregar_novedad\`** | \`{ "reporteId": "string", "novedad": { ... } }\` | Envia una novedad redactada localmente. El servidor la guarda en MongoDB y la proyecta a todos. |
-| **\`actualizar_novedad\`** | \`{ "reporteId": "string", "novedadId": "string", "cambios": { ... } }\` | Modifica en tiempo real los datos de una novedad existente (tipo, dirección, recurso, fotos, etc.). |
-| **\`eliminar_novedad\`** | \`{ "reporteId": "string", "novedadId": "string" }\` | Elimina una novedad del reporte y sincroniza a todos los operadores conectados. |
-| **\`eliminar_reporte\`** | \`{ "reporteId": "string" }\` | Elimina un reporte completo y notifica a los operadores conectados. |
+| **\`unirse_reporte\`** | \`{ "reporteId": 1 }\` | Se une a la sala del reporte y solicita el estado actual con sus locks. |
+| **\`lock_campo\`** | \`{ "reporteId": 1, "campoKey": "string" }\` | Notifica que el operador comenzo a editar un campo general (ej: \`numero_rds\`, \`inocar_pleamar\`). |
+| **\`unlock_campo\`** | \`{ "reporteId": 1, "campoKey": "string" }\` | Libera el candado del campo al terminar la edicion (\`blur\`). |
+| **\`actualizar_parametros\`** | \`{ "reporteId": 1, "parametros": { ... } }\` | Guarda y sincroniza cambios en los campos generales (RDS, INOCAR, horas de corte). |
+| **\`agregar_novedad\`** | \`{ "reporteId": 1, "novedad": { ... } }\` | Envia una novedad redactada localmente. El servidor la guarda en PostgreSQL y la proyecta a todos. |
+| **\`actualizar_novedad\`** | \`{ "reporteId": 1, "novedadId": 1, "cambios": { ... } }\` | Modifica en tiempo real los datos de una novedad existente (tipo, dirección, recurso, fotos, etc.). |
+| **\`eliminar_novedad\`** | \`{ "reporteId": 1, "novedadId": 1 }\` | Elimina una novedad del reporte y sincroniza a todos los operadores conectados. |
+| **\`eliminar_reporte\`** | \`{ "reporteId": 1 }\` | Elimina un reporte completo y notifica a los operadores conectados. |
 
 ---
 
@@ -120,7 +120,7 @@ const socket = io('http://localhost:3090', {
             inocar_fecha: { type: 'string', example: '7 de mayo' },
             inocar_pleamar: { type: 'string', example: 'a las 22h42 con 4.13m' },
             inocar_bajamar: { type: 'string', example: 'a las 05h27 del 08/05/2026 con 0.79m' },
-            usuario_id: { type: 'string', example: '66d8f1b38dcebf7429471b8a', description: 'ID de usuario para agregarlo como colaborador inicial' },
+            usuario_id: { type: 'integer', example: 1, description: 'ID de usuario para agregarlo como colaborador inicial' },
             correo_colaborador: { type: 'string', example: 'operador2@segura.gob.ec', description: 'Correo del usuario a agregar como colaborador inicial' },
             colaboradores: {
               type: 'array',
@@ -152,7 +152,12 @@ const socket = io('http://localhost:3090', {
           properties: {
             tipo_evento: { 
               type: 'string', 
-              enum: ['AGUA', 'ARBOL', 'DESLIZAMIENTO', 'POSTE', 'SINIESTRO', 'INUNDACION', 'VENDAVAL', 'AFECTACION', 'OTRO'],
+              enum: ['AGUA', 'ARBOL', 'DESLIZAMIENTO', 'POSTE', 'SINIESTRO', 'INUNDACION', 'VENDAVAL', 'AFECTACION'],
+              example: 'AGUA'
+            },
+            tipo: { 
+              type: 'string', 
+              enum: ['AGUA', 'ARBOL', 'DESLIZAMIENTO', 'POSTE', 'SINIESTRO', 'INUNDACION', 'VENDAVAL', 'AFECTACION'],
               example: 'AGUA'
             },
             direccion: { type: 'string', example: 'PROSPERINA 6TO CALLEJON Y AV 41 DIAGONAL A LAS ROSAS' },
@@ -160,12 +165,40 @@ const socket = io('http://localhost:3090', {
             instituciones: { type: 'string', example: '@emapagye @interagua' },
             fecha_evento: { type: 'string', example: '2026-08-25' },
             hora_evento: { type: 'string', example: '16:40' },
+            fecha: { type: 'string', format: 'date-time', example: '2026-08-25T16:40:00Z' },
             latitud: { type: 'number', example: -2.1894 },
             longitud: { type: 'number', example: -79.8891 },
+            recurso: { type: 'string', example: 'INS-ALC' },
             recurso_asignado: { type: 'string', example: 'INS-ALC' },
+            estado: { type: 'string', enum: ['PENDIENTE', 'EN_SITIO', 'EN_ATENCION', 'SOLUCIONADO'], example: 'PENDIENTE' },
             estado_operativo: { type: 'string', example: 'PENDIENTE' },
             descripcion: { type: 'string', example: 'Acumulación de agua considerable en calzada con afectación al tránsito.' },
+            acciones: { type: 'string', example: 'Se despachó cuadrilla de Interagua.' },
             acciones_inmediatas: { type: 'string', example: 'Se despachó cuadrilla de Interagua.' },
+            hora_sitio: { type: 'string', example: '17:10' },
+            solucionado: { type: 'string', example: '18:30' },
+            reporte_id: { type: 'integer', example: 1, description: 'ID opcional del reporte al que se asocia la novedad' },
+            datos_adicionales: {
+              type: 'object',
+              description: 'Metadatos adicionales en formato JSONB (ficha, camaras, conteo de recursos, etc.)',
+              example: {
+                ficha: 'FICHA-2026-001',
+                camara_cvvc: 'CAM-09',
+                via_afectada: 'SI',
+                recursos: { BCBG: 1, ATM: 2 },
+                personal: { BCBG: 3, ATM: 4 }
+              }
+            },
+            recursos_instituciones: {
+              type: 'object',
+              description: 'Desglose de vehículos/recursos por institución',
+              example: { BCBG: 1, ATM: 2 }
+            },
+            personal_instituciones: {
+              type: 'object',
+              description: 'Desglose de personal/efectivos por institución',
+              example: { BCBG: 3, ATM: 4 }
+            },
             fotos: {
               type: 'array',
               items: { type: 'string' },
@@ -178,7 +211,12 @@ const socket = io('http://localhost:3090', {
           properties: {
             tipo_evento: { 
               type: 'string', 
-              enum: ['AGUA', 'ARBOL', 'DESLIZAMIENTO', 'POSTE', 'SINIESTRO', 'INUNDACION', 'VENDAVAL', 'AFECTACION', 'OTRO'],
+              enum: ['AGUA', 'ARBOL', 'DESLIZAMIENTO', 'POSTE', 'SINIESTRO', 'INUNDACION', 'VENDAVAL', 'AFECTACION'],
+              example: 'AGUA'
+            },
+            tipo: { 
+              type: 'string', 
+              enum: ['AGUA', 'ARBOL', 'DESLIZAMIENTO', 'POSTE', 'SINIESTRO', 'INUNDACION', 'VENDAVAL', 'AFECTACION'],
               example: 'AGUA'
             },
             direccion: { type: 'string', example: 'PROSPERINA 6TO CALLEJON Y AV 41 DIAGONAL A LAS ROSAS' },
@@ -186,13 +224,36 @@ const socket = io('http://localhost:3090', {
             instituciones: { type: 'string', example: '@emapagye @interagua' },
             fecha_evento: { type: 'string', example: '2026-08-25' },
             hora_evento: { type: 'string', example: '16:40' },
+            fecha: { type: 'string', format: 'date-time', example: '2026-08-25T16:40:00Z' },
             latitud: { type: 'number', example: -2.1894 },
             longitud: { type: 'number', example: -79.8891 },
+            recurso: { type: 'string', example: 'INS-ALC' },
             recurso_asignado: { type: 'string', example: 'INS-ALC' },
+            estado: { type: 'string', enum: ['PENDIENTE', 'EN_SITIO', 'EN_ATENCION', 'SOLUCIONADO'], example: 'SOLUCIONADO' },
             estado_operativo: { type: 'string', example: 'SOLUCIONADO' },
             descripcion: { type: 'string', example: 'Novedad atendida y vía habilitada.' },
+            acciones: { type: 'string', example: 'Se realizó limpieza de sumideros.' },
             acciones_inmediatas: { type: 'string', example: 'Se realizó limpieza de sumideros.' },
-            solucionado: { type: 'string', example: 'SI' },
+            hora_sitio: { type: 'string', example: '17:10' },
+            solucionado: { type: 'string', example: '18:30' },
+            reporte_id: { type: 'integer', example: 1 },
+            datos_adicionales: {
+              type: 'object',
+              example: {
+                ficha: 'FICHA-2026-001',
+                solucionado: 'SI',
+                recursos: { BCBG: 1, ATM: 2 },
+                personal: { BCBG: 3, ATM: 4 }
+              }
+            },
+            recursos_instituciones: {
+              type: 'object',
+              example: { BCBG: 1, ATM: 2 }
+            },
+            personal_instituciones: {
+              type: 'object',
+              example: { BCBG: 3, ATM: 4 }
+            },
             fotos: {
               type: 'array',
               items: { type: 'string' },
@@ -203,7 +264,7 @@ const socket = io('http://localhost:3090', {
       },
     },
   },
-  apis: ['./src/routes/*.js'],
+  apis: ['./src/routes/*.js', './server.js'],
 };
 
 const swaggerSpec = swaggerJsdoc(options);

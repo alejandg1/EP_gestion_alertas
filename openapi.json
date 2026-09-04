@@ -3,26 +3,31 @@
   "info": {
     "title": "API Sala Situacional - Sistema Colaborativo de Alertas",
     "version": "1.0.0",
-    "description": "Documentación OpenAPI interactiva para el sistema de alertas sala situacional Segura EP."
+    "description": "\n### Documentacion OpenAPI y Comunicacion en Tiempo Real (WebSockets)\n\nEste backend combina endpoints REST para operaciones transaccionales (autenticacion, subida de fotos, exportacion a SharePoint) y WebSockets (Socket.io) para colaboracion multi-operador en tiempo real.\n\n---\n\n### Protocolo de WebSockets (Socket.io)\n\n* **URL de Conexion:** `ws://localhost:3090` (o `http://localhost:3090` mediante cliente Socket.io).\n* **Path por defecto:** `/socket.io/`\n\n#### Autenticacion en el Handshake\nEl WebSocket valida el JWT de sesion del operador:\n```javascript\nimport { io } from 'socket.io-client';\n\nconst socket = io('http://localhost:3090', {\n  auth: {\n    token: 'TOKEN_JWT_DEL_LOGIN' // Obtenido en POST /auth/login\n  }\n});\n```\n\n---\n\n### Eventos emitidos por el Cliente (Client -> Server)\n\n| Evento | Payload JSON | Descripcion |\n| :--- | :--- | :--- |\n| **`unirse_reporte`** | `{ \"reporteId\": 1 }` | Se une a la sala del reporte y solicita el estado actual con sus locks. |\n| **`lock_campo`** | `{ \"reporteId\": 1, \"campoKey\": \"string\" }` | Notifica que el operador comenzo a editar un campo general (ej: `numero_rds`, `inocar_pleamar`). |\n| **`unlock_campo`** | `{ \"reporteId\": 1, \"campoKey\": \"string\" }` | Libera el candado del campo al terminar la edicion (`blur`). |\n| **`actualizar_parametros`** | `{ \"reporteId\": 1, \"parametros\": { ... } }` | Guarda y sincroniza cambios en los campos generales (RDS, INOCAR, horas de corte). |\n| **`agregar_novedad`** | `{ \"reporteId\": 1, \"novedad\": { ... } }` | Envia una novedad redactada localmente. El servidor la guarda en PostgreSQL y la proyecta a todos. |\n| **`actualizar_novedad`** | `{ \"reporteId\": 1, \"novedadId\": 1, \"cambios\": { ... } }` | Modifica en tiempo real los datos de una novedad existente (tipo, dirección, recurso, fotos, etc.). |\n| **`eliminar_novedad`** | `{ \"reporteId\": 1, \"novedadId\": 1 }` | Elimina una novedad del reporte y sincroniza a todos los operadores conectados. |\n| **`eliminar_reporte`** | `{ \"reporteId\": 1 }` | Elimina un reporte completo y notifica a los operadores conectados. |\n\n---\n\n### Eventos emitidos por el Servidor (Server -> Client Broadcast)\n\n| Evento | Payload Recibido | Accion en Frontend |\n| :--- | :--- | :--- |\n| **`reporte_cargado`** | `{ reporte, locks, usuariosActivos }` | Carga el reporte, sus novedades, la autoria calculada y los campos bloqueados actualmente. |\n| **`reporte_eliminado`** | `{ reporteId, detalles, eliminadoPor }` | Notifica la eliminación del reporte y remueve la vista activa. |\n| **`novedad_agregada`** | `{ novedad, colaboradores, elaborado_por }` | Renderiza la novedad en la lista y actualiza automaticamente el campo Elaborado por. |\n| **`novedad_actualizada`** | `{ novedad, colaboradores, elaborado_por, actualizadoPor }` | Actualiza la tarjeta de la novedad en pantalla sin recargar la lista. |\n| **`novedad_eliminada`** | `{ novedadId, colaboradores, elaborado_por, eliminadoPor }` | Remueve la novedad de la interfaz y actualiza el conteo y la autoría. |\n| **`campo_bloqueado`** | `{ campoKey, usuarioId, usuarioNombre }` | Deshabilita el input y muestra mensaje: En edicion por [Nombre]. |\n| **`campo_liberado`** | `{ campoKey }` | Reactiva el input y retira el estado de bloqueo. |\n| **`parametros_actualizados`** | `{ reporteId, parametros, colaboradores, actualizadoPor }` | Actualiza los valores de los parametros generales en pantalla sin recargar. |\n| **`usuarios_actualizados`** | `{ usuariosActivos: [{ usuarioId, nombre, correo }] }` | Lista de operadores conectados en la sala del reporte. |\n      "
   },
   "servers": [
     {
-      "url": "http://10.10.80.70:3090"
+      "url": "http://10.10.80.70:3090",
+      "description": "Servidor Principal (10.10.80.70:3090)"
+    },
+    {
+      "url": "http://localhost:3090",
+      "description": "Servidor Local (localhost:3090)"
     }
   ],
   "components": {
     "securitySchemes": {
-      "ApiKeyAuth": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "x-api-token",
-        "description": "Token de sistema del .env (SCRIPT_API_TOKEN)"
-      },
       "BearerAuth": {
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT",
-        "description": "Token JWT obtenido tras el inicio de sesión"
+        "description": "Token JWT obtenido tras el inicio de sesión (/auth/login)"
+      },
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-api-token",
+        "description": "Token opcional de sistema"
       }
     },
     "schemas": {
@@ -66,9 +71,6 @@
       },
       "CrearReporte": {
         "type": "object",
-        "required": [
-          "titulo"
-        ],
         "properties": {
           "titulo": {
             "type": "string",
@@ -77,6 +79,116 @@
           "observaciones_generales": {
             "type": "string",
             "example": "Monitoreo en tiempo real de lluvias y acumulación de agua."
+          },
+          "numero_rds": {
+            "type": "string",
+            "example": "SEGURA-EP-GASGEC-SS-2026-041 (Lluvias)"
+          },
+          "fecha_reporte": {
+            "type": "string",
+            "example": "2026-08-25"
+          },
+          "hora_inicio": {
+            "type": "string",
+            "example": "06:00"
+          },
+          "hora_fin": {
+            "type": "string",
+            "example": "22:00"
+          },
+          "revisado_por": {
+            "type": "string",
+            "example": "Jefe de Sala Situacional | MSc. Ing. Santiago Jaramillo"
+          },
+          "cabecera": {
+            "type": "string",
+            "example": "REPORTE DE NOVEDADES POR LLUVIAS INICIAL: 07/05/2026 21h30"
+          },
+          "periodo": {
+            "type": "string",
+            "example": "Durante la noche del 7 de mayo se han registrado las siguientes novedades en el cantón Guayaquil por efecto de las lluvias:"
+          },
+          "inocar_fecha": {
+            "type": "string",
+            "example": "7 de mayo"
+          },
+          "inocar_pleamar": {
+            "type": "string",
+            "example": "a las 22h42 con 4.13m"
+          },
+          "inocar_bajamar": {
+            "type": "string",
+            "example": "a las 05h27 del 08/05/2026 con 0.79m"
+          },
+          "usuario_id": {
+            "type": "integer",
+            "example": 1,
+            "description": "ID de usuario para agregarlo como colaborador inicial"
+          },
+          "correo_colaborador": {
+            "type": "string",
+            "example": "operador2@segura.gob.ec",
+            "description": "Correo del usuario a agregar como colaborador inicial"
+          },
+          "colaboradores": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "operador2@segura.gob.ec",
+              "operador3@segura.gob.ec"
+            ],
+            "description": "Lista de IDs o correos de colaboradores a vincular"
+          }
+        }
+      },
+      "ActualizarParametrosReporte": {
+        "type": "object",
+        "properties": {
+          "numero_rds": {
+            "type": "string",
+            "example": "SEGURA-EP-GASGEC-SS-2026-041 (Lluvias)"
+          },
+          "fecha_reporte": {
+            "type": "string",
+            "example": "2026-08-25"
+          },
+          "hora_inicio": {
+            "type": "string",
+            "example": "06:00"
+          },
+          "hora_fin": {
+            "type": "string",
+            "example": "22:00"
+          },
+          "revisado_por": {
+            "type": "string",
+            "example": "Jefe de Sala Situacional | MSc. Ing. Santiago Jaramillo"
+          },
+          "cabecera": {
+            "type": "string",
+            "example": "REPORTE DE NOVEDADES POR LLUVIAS INICIAL: 07/05/2026 21h30"
+          },
+          "periodo": {
+            "type": "string",
+            "example": "Durante la noche del 7 de mayo se han registrado las siguientes novedades en el cantón Guayaquil por efecto de las lluvias:"
+          },
+          "inocar_fecha": {
+            "type": "string",
+            "example": "7 de mayo"
+          },
+          "inocar_pleamar": {
+            "type": "string",
+            "example": "a las 22h42 con 4.13m"
+          },
+          "inocar_bajamar": {
+            "type": "string",
+            "example": "a las 05h27 del 08/05/2026 con 0.79m"
+          },
+          "observaciones_generales": {
+            "type": "string",
+            "example": "Observaciones actualizadas."
           }
         }
       },
@@ -96,8 +208,21 @@
               "SINIESTRO",
               "INUNDACION",
               "VENDAVAL",
-              "AFECTACION",
-              "OTRO"
+              "AFECTACION"
+            ],
+            "example": "AGUA"
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "AGUA",
+              "ARBOL",
+              "DESLIZAMIENTO",
+              "POSTE",
+              "SINIESTRO",
+              "INUNDACION",
+              "VENDAVAL",
+              "AFECTACION"
             ],
             "example": "AGUA"
           },
@@ -121,6 +246,11 @@
             "type": "string",
             "example": "16:40"
           },
+          "fecha": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-25T16:40:00Z"
+          },
           "latitud": {
             "type": "number",
             "example": -2.1894
@@ -129,41 +259,657 @@
             "type": "number",
             "example": -79.8891
           },
+          "recurso": {
+            "type": "string",
+            "example": "INS-ALC"
+          },
+          "recurso_asignado": {
+            "type": "string",
+            "example": "INS-ALC"
+          },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "PENDIENTE",
+              "EN_SITIO",
+              "EN_ATENCION",
+              "SOLUCIONADO"
+            ],
+            "example": "PENDIENTE"
+          },
+          "estado_operativo": {
+            "type": "string",
+            "example": "PENDIENTE"
+          },
           "descripcion": {
             "type": "string",
             "example": "Acumulación de agua considerable en calzada con afectación al tránsito."
           },
+          "acciones": {
+            "type": "string",
+            "example": "Se despachó cuadrilla de Interagua."
+          },
           "acciones_inmediatas": {
             "type": "string",
             "example": "Se despachó cuadrilla de Interagua."
+          },
+          "hora_sitio": {
+            "type": "string",
+            "example": "17:10"
+          },
+          "solucionado": {
+            "type": "string",
+            "example": "18:30"
+          },
+          "reporte_id": {
+            "type": "integer",
+            "example": 1,
+            "description": "ID opcional del reporte al que se asocia la novedad"
+          },
+          "datos_adicionales": {
+            "type": "object",
+            "description": "Metadatos adicionales en formato JSONB (ficha, camaras, conteo de recursos, etc.)",
+            "example": {
+              "ficha": "FICHA-2026-001",
+              "camara_cvvc": "CAM-09",
+              "via_afectada": "SI",
+              "recursos": {
+                "BCBG": 1,
+                "ATM": 2
+              },
+              "personal": {
+                "BCBG": 3,
+                "ATM": 4
+              }
+            }
+          },
+          "recursos_instituciones": {
+            "type": "object",
+            "description": "Desglose de vehículos/recursos por institución",
+            "example": {
+              "BCBG": 1,
+              "ATM": 2
+            }
+          },
+          "personal_instituciones": {
+            "type": "object",
+            "description": "Desglose de personal/efectivos por institución",
+            "example": {
+              "BCBG": 3,
+              "ATM": 4
+            }
+          },
+          "fotos": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "/uploads/fotos/foto-1724678123-123456789.jpg"
+            ]
+          }
+        }
+      },
+      "ActualizarNovedad": {
+        "type": "object",
+        "properties": {
+          "tipo_evento": {
+            "type": "string",
+            "enum": [
+              "AGUA",
+              "ARBOL",
+              "DESLIZAMIENTO",
+              "POSTE",
+              "SINIESTRO",
+              "INUNDACION",
+              "VENDAVAL",
+              "AFECTACION"
+            ],
+            "example": "AGUA"
+          },
+          "tipo": {
+            "type": "string",
+            "enum": [
+              "AGUA",
+              "ARBOL",
+              "DESLIZAMIENTO",
+              "POSTE",
+              "SINIESTRO",
+              "INUNDACION",
+              "VENDAVAL",
+              "AFECTACION"
+            ],
+            "example": "AGUA"
+          },
+          "direccion": {
+            "type": "string",
+            "example": "PROSPERINA 6TO CALLEJON Y AV 41 DIAGONAL A LAS ROSAS"
+          },
+          "aga": {
+            "type": "string",
+            "example": "A09"
+          },
+          "instituciones": {
+            "type": "string",
+            "example": "@emapagye @interagua"
+          },
+          "fecha_evento": {
+            "type": "string",
+            "example": "2026-08-25"
+          },
+          "hora_evento": {
+            "type": "string",
+            "example": "16:40"
+          },
+          "fecha": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-08-25T16:40:00Z"
+          },
+          "latitud": {
+            "type": "number",
+            "example": -2.1894
+          },
+          "longitud": {
+            "type": "number",
+            "example": -79.8891
+          },
+          "recurso": {
+            "type": "string",
+            "example": "INS-ALC"
+          },
+          "recurso_asignado": {
+            "type": "string",
+            "example": "INS-ALC"
+          },
+          "estado": {
+            "type": "string",
+            "enum": [
+              "PENDIENTE",
+              "EN_SITIO",
+              "EN_ATENCION",
+              "SOLUCIONADO"
+            ],
+            "example": "SOLUCIONADO"
+          },
+          "estado_operativo": {
+            "type": "string",
+            "example": "SOLUCIONADO"
+          },
+          "descripcion": {
+            "type": "string",
+            "example": "Novedad atendida y vía habilitada."
+          },
+          "acciones": {
+            "type": "string",
+            "example": "Se realizó limpieza de sumideros."
+          },
+          "acciones_inmediatas": {
+            "type": "string",
+            "example": "Se realizó limpieza de sumideros."
+          },
+          "hora_sitio": {
+            "type": "string",
+            "example": "17:10"
+          },
+          "solucionado": {
+            "type": "string",
+            "example": "18:30"
+          },
+          "reporte_id": {
+            "type": "integer",
+            "example": 1
+          },
+          "datos_adicionales": {
+            "type": "object",
+            "example": {
+              "ficha": "FICHA-2026-001",
+              "solucionado": "SI",
+              "recursos": {
+                "BCBG": 1,
+                "ATM": 2
+              },
+              "personal": {
+                "BCBG": 3,
+                "ATM": 4
+              }
+            }
+          },
+          "recursos_instituciones": {
+            "type": "object",
+            "example": {
+              "BCBG": 1,
+              "ATM": 2
+            }
+          },
+          "personal_instituciones": {
+            "type": "object",
+            "example": {
+              "BCBG": 3,
+              "ATM": 4
+            }
+          },
+          "fotos": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "/uploads/fotos/foto-1724678123-123456789.jpg"
+            ]
           }
         }
       }
     }
   },
-  "security": [
-    {
-      "ApiKeyAuth": []
-    }
-  ],
   "paths": {
+    "/usuarios": {
+      "get": {
+        "summary": "Listar todos los usuarios con paginación y filtros (Solo Admin)",
+        "tags": [
+          "Usuarios"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            },
+            "description": "Número de página"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            },
+            "description": "Cantidad de resultados por página"
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Búsqueda por coincidencia en nombre o correo"
+          },
+          {
+            "in": "query",
+            "name": "rol",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "admin",
+                "operador"
+              ]
+            },
+            "description": "Filtrar por rol"
+          },
+          {
+            "in": "query",
+            "name": "incluirEliminados",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Incluir usuarios desactivados (soft-deleted)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista de usuarios obtenida exitosamente"
+          },
+          "401": {
+            "description": "No autenticado"
+          },
+          "403": {
+            "description": "No autorizado (requiere rol admin)"
+          }
+        }
+      },
+      "post": {
+        "summary": "Crear un nuevo usuario (Solo Admin)",
+        "tags": [
+          "Usuarios"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "correo",
+                  "password"
+                ],
+                "properties": {
+                  "correo": {
+                    "type": "string",
+                    "example": "operador1@seguraep.gob.ec"
+                  },
+                  "password": {
+                    "type": "string",
+                    "example": "Clave123*"
+                  },
+                  "nombre": {
+                    "type": "string",
+                    "example": "Juan Pérez"
+                  },
+                  "rol": {
+                    "type": "string",
+                    "enum": [
+                      "admin",
+                      "operador"
+                    ],
+                    "default": "operador"
+                  },
+                  "requiere_cambio_pw": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Usuario creado exitosamente"
+          },
+          "400": {
+            "description": "Datos inválidos o correo duplicado"
+          }
+        }
+      }
+    },
+    "/usuarios/{id}": {
+      "get": {
+        "summary": "Obtener información detallada de un usuario por ID (Solo Admin)",
+        "tags": [
+          "Usuarios"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID numérico del usuario"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usuario encontrado"
+          },
+          "404": {
+            "description": "Usuario no encontrado"
+          }
+        }
+      },
+      "put": {
+        "summary": "Actualizar datos de un usuario (Solo Admin)",
+        "tags": [
+          "Usuarios"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "nombre": {
+                    "type": "string",
+                    "example": "Juan Carlos Pérez"
+                  },
+                  "rol": {
+                    "type": "string",
+                    "enum": [
+                      "admin",
+                      "operador"
+                    ]
+                  },
+                  "correo": {
+                    "type": "string",
+                    "example": "jc.perez@seguraep.gob.ec"
+                  },
+                  "requiere_cambio_pw": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Usuario actualizado exitosamente"
+          },
+          "400": {
+            "description": "Datos inválidos"
+          },
+          "404": {
+            "description": "Usuario no encontrado"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Desactivar usuario - Eliminación Lógica (Solo Admin)",
+        "tags": [
+          "Usuarios"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID numérico del usuario a desactivar"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usuario desactivado exitosamente (eliminación lógica)"
+          },
+          "400": {
+            "description": "No se puede desactivar la propia cuenta"
+          },
+          "404": {
+            "description": "Usuario no encontrado o ya desactivado"
+          }
+        }
+      }
+    },
+    "/usuarios/{id}/password": {
+      "patch": {
+        "summary": "Restablecer contraseña de un usuario (Solo Admin)",
+        "tags": [
+          "Usuarios"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "newPassword"
+                ],
+                "properties": {
+                  "newPassword": {
+                    "type": "string",
+                    "example": "NuevaClaveSegura2026*"
+                  },
+                  "requiere_cambio_pw": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Contraseña restablecida exitosamente"
+          },
+          "400": {
+            "description": "Datos inválidos"
+          },
+          "404": {
+            "description": "Usuario no encontrado"
+          }
+        }
+      }
+    },
+    "/usuarios/{id}/restaurar": {
+      "post": {
+        "summary": "Restaurar / Reactivar un usuario desactivado lógicamente (Solo Admin)",
+        "tags": [
+          "Usuarios"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID del usuario a restaurar"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Usuario restaurado exitosamente"
+          },
+          "400": {
+            "description": "El usuario ya se encuentra activo"
+          },
+          "404": {
+            "description": "Usuario no encontrado"
+          }
+        }
+      }
+    },
     "/reportes": {
       "get": {
-        "summary": "Listar todos los reportes con colaboradores (N:N) y novedades (1:N)",
+        "summary": "Listar reportes (Paginación opcional, filtros de búsqueda y fechas)",
         "tags": [
           "Reportes"
         ],
         "security": [
           {
-            "ApiKeyAuth": []
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Número de página (opcional, ej. 1)"
           },
           {
-            "BearerAuth": []
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Cantidad de registros por página (opcional, ej. 15)"
+          },
+          {
+            "in": "query",
+            "name": "busqueda",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Búsqueda por número RDS, título o elaborado por"
+          },
+          {
+            "in": "query",
+            "name": "fechaDesde",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Fecha inicio (YYYY-MM-DD)"
+          },
+          {
+            "in": "query",
+            "name": "fechaHasta",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Fecha fin (YYYY-MM-DD)"
           }
         ],
         "responses": {
           "200": {
-            "description": "Lista de reportes"
+            "description": "Lista o página de reportes"
           }
         }
       },
@@ -173,9 +919,6 @@
           "Reportes"
         ],
         "security": [
-          {
-            "ApiKeyAuth": []
-          },
           {
             "BearerAuth": []
           }
@@ -197,6 +940,46 @@
         }
       }
     },
+    "/reportes/upload-foto": {
+      "post": {
+        "summary": "Subir fotografías de novedad al servidor local (Máx. 2 imágenes, 5MB c/u)",
+        "tags": [
+          "Reportes"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fotos": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Fotos subidas y guardadas exitosamente en el servidor"
+          },
+          "400": {
+            "description": "No se enviaron archivos o formato no permitido"
+          }
+        }
+      }
+    },
     "/reportes/{id}": {
       "get": {
         "summary": "Obtener reporte por ID con sus novedades y colaboradores",
@@ -204,9 +987,6 @@
           "Reportes"
         ],
         "security": [
-          {
-            "ApiKeyAuth": []
-          },
           {
             "BearerAuth": []
           }
@@ -217,9 +997,9 @@
             "name": "id",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "integer"
             },
-            "description": "ID de MongoDB del reporte"
+            "description": "ID numérico del reporte"
           }
         ],
         "responses": {
@@ -230,18 +1010,13 @@
             "description": "Reporte no encontrado"
           }
         }
-      }
-    },
-    "/reportes/{id}/novedades": {
-      "post": {
-        "summary": "Agregar una novedad al reporte y registrar al colaborador",
+      },
+      "delete": {
+        "summary": "Eliminar un reporte completo por ID",
         "tags": [
           "Reportes"
         ],
         "security": [
-          {
-            "ApiKeyAuth": []
-          },
           {
             "BearerAuth": []
           }
@@ -252,9 +1027,86 @@
             "name": "id",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "integer"
             },
-            "description": "ID del reporte"
+            "description": "ID numérico del reporte a eliminar"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reporte eliminado exitosamente"
+          },
+          "400": {
+            "description": "ID de reporte inválido"
+          },
+          "404": {
+            "description": "Reporte no encontrado"
+          }
+        }
+      }
+    },
+    "/reportes/{id}/parametros": {
+      "put": {
+        "summary": "Actualizar parámetros institucionales del reporte (Sección 2 - RDS e INOCAR)",
+        "tags": [
+          "Reportes"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID numérico del reporte"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActualizarParametrosReporte"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Parámetros del reporte actualizados exitosamente"
+          },
+          "404": {
+            "description": "Reporte no encontrado"
+          }
+        }
+      }
+    },
+    "/reportes/{id}/novedades": {
+      "post": {
+        "summary": "Agregar una novedad al reporte (1:N) vinculada directamente al Usuario con fotos",
+        "tags": [
+          "Reportes"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID numérico del reporte"
           }
         ],
         "requestBody": {
@@ -263,6 +1115,56 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/AgregarNovedad"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tipo_evento": {
+                    "type": "string"
+                  },
+                  "direccion": {
+                    "type": "string"
+                  },
+                  "aga": {
+                    "type": "string"
+                  },
+                  "instituciones": {
+                    "type": "string"
+                  },
+                  "fecha_evento": {
+                    "type": "string"
+                  },
+                  "hora_evento": {
+                    "type": "string"
+                  },
+                  "latitud": {
+                    "type": "number"
+                  },
+                  "longitud": {
+                    "type": "number"
+                  },
+                  "recurso_asignado": {
+                    "type": "string"
+                  },
+                  "estado_operativo": {
+                    "type": "string"
+                  },
+                  "descripcion": {
+                    "type": "string"
+                  },
+                  "acciones_inmediatas": {
+                    "type": "string"
+                  },
+                  "fotos": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
               }
             }
           }
@@ -274,16 +1176,13 @@
         }
       }
     },
-    "/reportes/{id}/exportar-excel": {
-      "post": {
-        "summary": "Registrar y sincronizar novedades del reporte en el Excel de SharePoint",
+    "/reportes/{id}/novedades/{novedadId}": {
+      "put": {
+        "summary": "Actualizar una novedad existente del reporte",
         "tags": [
           "Reportes"
         ],
         "security": [
-          {
-            "ApiKeyAuth": []
-          },
           {
             "BearerAuth": []
           }
@@ -294,17 +1193,154 @@
             "name": "id",
             "required": true,
             "schema": {
-              "type": "string"
+              "type": "integer"
             },
-            "description": "ID del reporte a exportar"
+            "description": "ID numérico del reporte"
+          },
+          {
+            "in": "path",
+            "name": "novedadId",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID numérico de la novedad a actualizar"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActualizarNovedad"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tipo_evento": {
+                    "type": "string"
+                  },
+                  "direccion": {
+                    "type": "string"
+                  },
+                  "aga": {
+                    "type": "string"
+                  },
+                  "instituciones": {
+                    "type": "string"
+                  },
+                  "fecha_evento": {
+                    "type": "string"
+                  },
+                  "hora_evento": {
+                    "type": "string"
+                  },
+                  "latitud": {
+                    "type": "number"
+                  },
+                  "longitud": {
+                    "type": "number"
+                  },
+                  "recurso_asignado": {
+                    "type": "string"
+                  },
+                  "estado_operativo": {
+                    "type": "string"
+                  },
+                  "descripcion": {
+                    "type": "string"
+                  },
+                  "acciones_inmediatas": {
+                    "type": "string"
+                  },
+                  "fotos": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Novedad actualizada exitosamente"
+          },
+          "404": {
+            "description": "Reporte o novedad no encontrada"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Eliminar una novedad del reporte",
+        "tags": [
+          "Reportes"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID numérico del reporte"
+          },
+          {
+            "in": "path",
+            "name": "novedadId",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID numérico de la novedad a eliminar"
           }
         ],
         "responses": {
           "200": {
-            "description": "Novedades registradas exitosamente en la tabla de SharePoint"
+            "description": "Novedad eliminada exitosamente"
           },
-          "400": {
-            "description": "El reporte no contiene novedades"
+          "404": {
+            "description": "Reporte o novedad no encontrada"
+          }
+        }
+      }
+    },
+    "/reportes/{id}/metricas-tiempos": {
+      "get": {
+        "summary": "Obtener analítica de tiempos de respuesta y personal por institución para este reporte",
+        "tags": [
+          "Reportes"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID numérico del reporte"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Métricas agregadas de tiempos de respuesta del reporte"
           },
           "404": {
             "description": "Reporte no encontrado"
@@ -312,15 +1348,529 @@
         }
       }
     },
-    "/auth/registro": {
-      "post": {
-        "summary": "Registrar un nuevo usuario/operador",
+    "/novedades/metricas-tiempos": {
+      "get": {
+        "summary": "Obtener analítica global y KPIs de tiempos de respuesta y personal por institución",
         "tags": [
-          "Autenticación"
+          "Novedades"
         ],
         "security": [
           {
-            "ApiKeyAuth": []
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "fechaDesde",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Fecha inicio (YYYY-MM-DD)"
+          },
+          {
+            "in": "query",
+            "name": "fechaHasta",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Fecha fin (YYYY-MM-DD)"
+          },
+          {
+            "in": "query",
+            "name": "tipo",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filtrar por tipo de evento (AGUA, ARBOL, SINIESTRO, etc.)"
+          },
+          {
+            "in": "query",
+            "name": "aga",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Filtrar por sector AGA (ej. A02, A09)"
+          },
+          {
+            "in": "query",
+            "name": "reporte_id",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID de reporte específico"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Métricas agregadas de tiempos de respuesta y desglose institucional"
+          }
+        }
+      }
+    },
+    "/novedades": {
+      "get": {
+        "summary": "Listar todas las novedades registradas con paginación y filtros",
+        "tags": [
+          "Novedades"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            },
+            "description": "Número de página para paginación"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "default": 15
+            },
+            "description": "Cantidad de registros por página"
+          },
+          {
+            "in": "query",
+            "name": "tipo",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "AGUA",
+                "ARBOL",
+                "DESLIZAMIENTO",
+                "POSTE",
+                "SINIESTRO",
+                "INUNDACION",
+                "VENDAVAL",
+                "AFECTACION"
+              ]
+            },
+            "description": "Filtrar por tipo de novedad"
+          },
+          {
+            "in": "query",
+            "name": "estado",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PENDIENTE",
+                "EN_SITIO",
+                "EN_ATENCION",
+                "SOLUCIONADO"
+              ]
+            },
+            "description": "Filtrar por estado operativo"
+          },
+          {
+            "in": "query",
+            "name": "busqueda",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Búsqueda de texto en dirección, descripción, AGA o recurso"
+          },
+          {
+            "in": "query",
+            "name": "fechaDesde",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Fecha inicio (YYYY-MM-DD)"
+          },
+          {
+            "in": "query",
+            "name": "fechaHasta",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Fecha fin (YYYY-MM-DD)"
+          },
+          {
+            "in": "query",
+            "name": "soloHistoricos",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Si es true, retorna novedades sin reporte asociado (históricos)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista o página de novedades obtenida exitosamente"
+          },
+          "401": {
+            "description": "No autenticado"
+          },
+          "500": {
+            "description": "Error interno del servidor"
+          }
+        }
+      },
+      "post": {
+        "summary": "Crear una novedad independiente o asociada a un reporte con soporte de fotos",
+        "tags": [
+          "Novedades"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgregarNovedad"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tipo": {
+                    "type": "string",
+                    "enum": [
+                      "AGUA",
+                      "ARBOL",
+                      "DESLIZAMIENTO",
+                      "POSTE",
+                      "SINIESTRO",
+                      "INUNDACION",
+                      "VENDAVAL",
+                      "AFECTACION"
+                    ],
+                    "example": "AGUA"
+                  },
+                  "direccion": {
+                    "type": "string",
+                    "example": "Av. 9 de Octubre y Boyacá"
+                  },
+                  "aga": {
+                    "type": "string",
+                    "example": "A09"
+                  },
+                  "instituciones": {
+                    "type": "string",
+                    "example": "@emapagye @interagua"
+                  },
+                  "fecha": {
+                    "type": "string",
+                    "format": "date-time",
+                    "example": "2026-08-25T16:40:00Z"
+                  },
+                  "latitud": {
+                    "type": "number",
+                    "example": -2.1894
+                  },
+                  "longitud": {
+                    "type": "number",
+                    "example": -79.8891
+                  },
+                  "recurso": {
+                    "type": "string",
+                    "example": "INS-ALC"
+                  },
+                  "estado": {
+                    "type": "string",
+                    "enum": [
+                      "PENDIENTE",
+                      "EN_SITIO",
+                      "EN_ATENCION",
+                      "SOLUCIONADO"
+                    ],
+                    "example": "PENDIENTE"
+                  },
+                  "descripcion": {
+                    "type": "string",
+                    "example": "Acumulación de agua por lluvias"
+                  },
+                  "acciones": {
+                    "type": "string",
+                    "example": "Cuadrilla despachada"
+                  },
+                  "hora_sitio": {
+                    "type": "string",
+                    "example": "17:10"
+                  },
+                  "solucionado": {
+                    "type": "string",
+                    "example": "18:30"
+                  },
+                  "reporte_id": {
+                    "type": "integer",
+                    "example": 1
+                  },
+                  "datos_adicionales": {
+                    "type": "string",
+                    "description": "Cadena JSON o JSON object de datos adicionales",
+                    "example": "{\"ficha\":\"FICHA-2026-001\"}"
+                  },
+                  "recursos_instituciones": {
+                    "type": "string",
+                    "description": "Objeto o cadena JSON con conteo de vehículos",
+                    "example": "{\"BCBG\":1}"
+                  },
+                  "personal_instituciones": {
+                    "type": "string",
+                    "description": "Objeto o cadena JSON con conteo de personal",
+                    "example": "{\"BCBG\":3}"
+                  },
+                  "fotos": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    },
+                    "description": "Archivos fotográficos (máximo 2 imágenes, máx 5MB c/u)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Novedad creada exitosamente"
+          },
+          "400": {
+            "description": "Datos inválidos"
+          },
+          "401": {
+            "description": "No autenticado"
+          },
+          "500": {
+            "description": "Error interno del servidor"
+          }
+        }
+      }
+    },
+    "/novedades/{id}": {
+      "get": {
+        "summary": "Obtener el detalle completo de una novedad por su ID",
+        "tags": [
+          "Novedades"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID numérico de la novedad"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Novedad encontrada con éxito"
+          },
+          "401": {
+            "description": "No autenticado"
+          },
+          "404": {
+            "description": "Novedad no encontrada"
+          },
+          "500": {
+            "description": "Error interno del servidor"
+          }
+        }
+      },
+      "put": {
+        "summary": "Actualizar una novedad existente por su ID (recálculo de tiempos y colaboración)",
+        "tags": [
+          "Novedades"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID numérico de la novedad a actualizar"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActualizarNovedad"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tipo": {
+                    "type": "string",
+                    "enum": [
+                      "AGUA",
+                      "ARBOL",
+                      "DESLIZAMIENTO",
+                      "POSTE",
+                      "SINIESTRO",
+                      "INUNDACION",
+                      "VENDAVAL",
+                      "AFECTACION"
+                    ]
+                  },
+                  "direccion": {
+                    "type": "string"
+                  },
+                  "aga": {
+                    "type": "string"
+                  },
+                  "instituciones": {
+                    "type": "string"
+                  },
+                  "fecha": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "latitud": {
+                    "type": "number"
+                  },
+                  "longitud": {
+                    "type": "number"
+                  },
+                  "recurso": {
+                    "type": "string"
+                  },
+                  "estado": {
+                    "type": "string",
+                    "enum": [
+                      "PENDIENTE",
+                      "EN_SITIO",
+                      "EN_ATENCION",
+                      "SOLUCIONADO"
+                    ]
+                  },
+                  "descripcion": {
+                    "type": "string"
+                  },
+                  "acciones": {
+                    "type": "string"
+                  },
+                  "hora_sitio": {
+                    "type": "string"
+                  },
+                  "solucionado": {
+                    "type": "string"
+                  },
+                  "reporte_id": {
+                    "type": "integer"
+                  },
+                  "datos_adicionales": {
+                    "type": "string"
+                  },
+                  "recursos_instituciones": {
+                    "type": "string"
+                  },
+                  "personal_instituciones": {
+                    "type": "string"
+                  },
+                  "fotos": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "binary"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Novedad actualizada exitosamente"
+          },
+          "400": {
+            "description": "Datos inválidos"
+          },
+          "401": {
+            "description": "No autenticado"
+          },
+          "404": {
+            "description": "Novedad no encontrada"
+          },
+          "500": {
+            "description": "Error interno del servidor"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Eliminar una novedad por su ID (eliminación lógica - soft delete)",
+        "tags": [
+          "Novedades"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "ID numérico de la novedad a eliminar"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Novedad eliminada exitosamente"
+          },
+          "401": {
+            "description": "No autenticado"
+          },
+          "404": {
+            "description": "Novedad no encontrada"
+          },
+          "500": {
+            "description": "Error interno del servidor"
+          }
+        }
+      }
+    },
+    "/auth/registro": {
+      "post": {
+        "summary": "Registrar un nuevo usuario/operador (Solo Administradores)",
+        "tags": [
+          "Autenticacion"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
           }
         ],
         "requestBody": {
@@ -340,8 +1890,11 @@
           "400": {
             "description": "Datos inválidos o correo ya registrado"
           },
+          "401": {
+            "description": "No autenticado"
+          },
           "403": {
-            "description": "SCRIPT_API_TOKEN inválido o ausente"
+            "description": "No autorizado (requiere rol admin)"
           }
         }
       }
@@ -350,12 +1903,7 @@
       "post": {
         "summary": "Iniciar sesión y obtener JWT",
         "tags": [
-          "Autenticación"
-        ],
-        "security": [
-          {
-            "ApiKeyAuth": []
-          }
+          "Autenticacion"
         ],
         "requestBody": {
           "required": true,
@@ -373,9 +1921,6 @@
           },
           "401": {
             "description": "Credenciales incorrectas"
-          },
-          "403": {
-            "description": "SCRIPT_API_TOKEN inválido o ausente"
           }
         }
       }
@@ -384,12 +1929,9 @@
       "post": {
         "summary": "Cerrar sesión activa (1:N)",
         "tags": [
-          "Autenticación"
+          "Autenticacion"
         ],
         "security": [
-          {
-            "ApiKeyAuth": []
-          },
           {
             "BearerAuth": []
           }
@@ -405,12 +1947,9 @@
       "get": {
         "summary": "Obtener perfil del usuario autenticado",
         "tags": [
-          "Autenticación"
+          "Autenticacion"
         ],
         "security": [
-          {
-            "ApiKeyAuth": []
-          },
           {
             "BearerAuth": []
           }
@@ -418,6 +1957,70 @@
         "responses": {
           "200": {
             "description": "Datos del usuario autenticado"
+          }
+        }
+      }
+    },
+    "/auth/chpass": {
+      "post": {
+        "summary": "Cambiar contraseña (propia o de otro usuario si es Admin)",
+        "tags": [
+          "Autenticacion"
+        ],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "newPassword"
+                ],
+                "properties": {
+                  "currentPassword": {
+                    "type": "string",
+                    "description": "Obligatorio solo si el usuario cambia su propia contraseña"
+                  },
+                  "newPassword": {
+                    "type": "string",
+                    "description": "Nueva contraseña"
+                  },
+                  "usuarioId": {
+                    "type": "string",
+                    "description": "ID del usuario a modificar (solo administradores)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Contraseña cambiada exitosamente"
+          },
+          "400": {
+            "description": "Datos inválidos"
+          },
+          "401": {
+            "description": "Contraseña actual incorrecta o token inválido"
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Estado del servicio y enlaces a la documentación OpenAPI",
+        "tags": [
+          "Sistema"
+        ],
+        "responses": {
+          "200": {
+            "description": "Estado del servidor y URLs de documentación"
           }
         }
       }

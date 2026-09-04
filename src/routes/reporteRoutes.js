@@ -101,8 +101,8 @@ router.post('/upload-foto', protegerRuta, upload.array('fotos', 2), reporteContr
  *         name: id
  *         required: true
  *         schema:
- *           type: string
- *         description: ID de MongoDB del reporte
+ *           type: integer
+ *         description: ID numérico del reporte
  *     responses:
  *       200:
  *         description: Reporte encontrado
@@ -118,8 +118,8 @@ router.post('/upload-foto', protegerRuta, upload.array('fotos', 2), reporteContr
  *         name: id
  *         required: true
  *         schema:
- *           type: string
- *         description: ID de MongoDB del reporte a eliminar
+ *           type: integer
+ *         description: ID numérico del reporte a eliminar
  *     responses:
  *       200:
  *         description: Reporte eliminado exitosamente
@@ -144,8 +144,8 @@ router.delete('/:id', protegerRuta, reporteController.eliminarReporte);
  *         name: id
  *         required: true
  *         schema:
- *           type: string
- *         description: ID del reporte
+ *           type: integer
+ *         description: ID numérico del reporte
  *     requestBody:
  *       required: true
  *       content:
@@ -173,8 +173,8 @@ router.put('/:id/parametros', protegerRuta, reporteController.actualizarParametr
  *         name: id
  *         required: true
  *         schema:
- *           type: string
- *         description: ID del reporte
+ *           type: integer
+ *         description: ID numérico del reporte
  *     requestBody:
  *       required: true
  *       content:
@@ -221,14 +221,14 @@ router.post('/:id/novedades', protegerRuta, upload.array('fotos', 2), reporteCon
  *         name: id
  *         required: true
  *         schema:
- *           type: string
- *         description: ID del reporte
+ *           type: integer
+ *         description: ID numérico del reporte
  *       - in: path
  *         name: novedadId
  *         required: true
  *         schema:
- *           type: string
- *         description: ID de la novedad a actualizar
+ *           type: integer
+ *         description: ID numérico de la novedad a actualizar
  *     requestBody:
  *       required: true
  *       content:
@@ -271,14 +271,14 @@ router.post('/:id/novedades', protegerRuta, upload.array('fotos', 2), reporteCon
  *         name: id
  *         required: true
  *         schema:
- *           type: string
- *         description: ID del reporte
+ *           type: integer
+ *         description: ID numérico del reporte
  *       - in: path
  *         name: novedadId
  *         required: true
  *         schema:
- *           type: string
- *         description: ID de la novedad a eliminar
+ *           type: integer
+ *         description: ID numérico de la novedad a eliminar
  *     responses:
  *       200:
  *         description: Novedad eliminada exitosamente
